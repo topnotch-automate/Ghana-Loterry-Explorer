@@ -1,0 +1,73 @@
+import express from 'express';
+import cors from 'cors';
+import drawsRouter from './routes/draws.js';
+import analyticsRouter from './routes/analytics.js';
+import { config } from './config/index.js';
+import { logger } from './utils/logger.js';
+import { AppError } from './utils/errors.js';
+
+const app = express();
+
+// Middleware
+app.use(cors({
+  origin: config.cors.origin,
+  credentials: true,
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  logger.debug(`${req.method} ${req.path}`, { query: req.query, body: req.body });
+  next();
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    environment: config.nodeEnv,
+  });
+});
+
+// API Routes
+app.use('/api/draws', drawsRouter);
+app.use('/api/analytics', analyticsRouter);
+
+// Error handling middleware
+app.use((err: Error | AppError, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof AppError) {
+    logger.warn(`AppError: ${err.message}`, err);
+    return res.status(err.statusCode).json({
+      success: false,
+      error: err.message,
+      code: err.code,
+      details: config.nodeEnv === 'development' ? err.details : undefined,
+    });
+  }
+
+  // Unknown errors
+  logger.error('Unhandled error', err);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    message: config.nodeEnv === 'development' ? err.message : undefined,
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    path: req.path,
+  });
+});
+
+app.listen(config.port, () => {
+  logger.info(`🚀 Server running on http://localhost:${config.port}`);
+  logger.info(`📊 API available at http://localhost:${config.port}/api`);
+  logger.info(`🌍 Environment: ${config.nodeEnv}`);
+});
+

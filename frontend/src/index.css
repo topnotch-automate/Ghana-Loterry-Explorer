@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+  
+  * {
+    @apply border-gray-200;
+  }
+}
+
+@layer components {
+  .number-chip {
+    @apply px-3 py-1.5 rounded-full text-sm font-semibold transition-all shadow-sm;
+  }
+  
+  .number-chip-winning {
+    @apply bg-gradient-to-r from-primary-600 to-primary-400 text-white hover:shadow-md;
+  }
+  
+  .number-chip-machine {
+    @apply bg-gray-100 text-gray-800 hover:bg-gray-200;
+  }
+  
+  .number-chip-highlight {
+    @apply bg-yellow-200 ring-2 ring-yellow-400 text-yellow-900 font-bold;
+  }
+  
+  .card {
+    @apply bg-white rounded-lg shadow-sm p-6 border border-gray-100;
+  }
+  
+  .card:hover {
+    @apply shadow-md;
+  }
+  
+  .btn-primary {
+    @apply px-4 py-2 rounded-md bg-gradient-to-r from-primary-600 to-accent-500 text-white font-medium hover:opacity-90 transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply px-4 py-2 rounded-md bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-colors shadow-sm hover:shadow-md;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all;
+  }
+  
+  .input-field:disabled {
+    @apply bg-gray-50 cursor-not-allowed;
+  }
+}
+
