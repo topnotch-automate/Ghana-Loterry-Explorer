@@ -195,5 +195,50 @@ router.get('/export', async (req, res, next) => {
   }
 });
 
+// POST /api/draws/import - Import draws from CSV
+router.post('/import', async (req, res, next) => {
+  try {
+    const { csvContent, format } = req.body;
+
+    if (!csvContent || typeof csvContent !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'CSV content is required in request body as "csvContent"',
+      });
+    }
+
+    // Parse CSV
+    const { parseCSV } = await import('../utils/csvParser.js');
+    const { draws, errors } = parseCSV(csvContent);
+
+    if (draws.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid draws found in CSV',
+        errors,
+      });
+    }
+
+    // Batch insert draws
+    const result = await drawService.batchInsertDraws(draws);
+
+    // Log import results
+    logger.info(`CSV Import: ${result.inserted} inserted, ${result.skipped} skipped, ${result.errors} errors`);
+
+    res.json({
+      success: true,
+      message: 'Import completed',
+      data: {
+        inserted: result.inserted,
+        skipped: result.skipped,
+        errors: result.errors,
+        parseErrors: errors.length > 0 ? errors : undefined,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;
 
