@@ -24,6 +24,7 @@ export const Analytics: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      
       const [freq30, freq365, hot, cold, sleeping] = await Promise.all([
         analyticsApi.getFrequency({ days: 30 }).catch(() => []),
         analyticsApi.getFrequency({ days: 365 }).catch(() => []),
@@ -142,11 +143,22 @@ export const Analytics: React.FC = () => {
       </div>
 
       {/* Frequency Chart */}
-      <FrequencyChart
-        data={currentFrequency}
-        title={`Number Frequency (Last ${timeframe} Days)`}
-        maxItems={30}
-      />
+      {currentFrequency.length > 0 ? (
+        <FrequencyChart
+          data={currentFrequency}
+          title={`Number Frequency (Last ${timeframe} Days)`}
+          maxItems={30}
+        />
+      ) : (
+        <div className="card">
+          <h3 className="text-lg font-semibold mb-4">
+            Number Frequency (Last {timeframe} Days)
+          </h3>
+          <div className="text-center text-gray-500 py-8">
+            No data available for the last {timeframe} days. Try selecting a different timeframe.
+          </div>
+        </div>
+      )}
 
       {/* Hot & Cold Numbers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -102,19 +102,48 @@ export class AnalyticsService {
 
   // Get sleeping numbers (not appeared in X days)
   async getSleepingNumbers(days: number = 30): Promise<number[]> {
-    const query = `
-      SELECT DISTINCT num AS number
-      FROM generate_series(1, 90) AS num
-      WHERE num NOT IN (
-        SELECT DISTINCT unnest(winning_numbers || machine_numbers) AS num
-        FROM draws
-        WHERE draw_date >= CURRENT_DATE - INTERVAL '${days} days'
-      )
-      ORDER BY number
+    // First, check if there are any draws in the period
+    const drawsCheckQuery = `
+      SELECT COUNT(*) as count
+      FROM draws
+      WHERE draw_date >= CURRENT_DATE - INTERVAL '${days} days'
     `;
+    
+    const drawsCheck = await pool.query(drawsCheckQuery);
+    const drawCount = parseInt(drawsCheck.rows[0]?.count || '0', 10);
+    
+    // If no draws exist in the period, return empty array (not all numbers)
+    if (drawCount === 0) {
+      return [];
+    }
+    
+    // Get all numbers that HAVE appeared in the last X days
+    const appearedQuery = `
+      SELECT DISTINCT unnest(winning_numbers || machine_numbers) AS num
+      FROM draws
+      WHERE draw_date >= CURRENT_DATE - INTERVAL '${days} days'
+    `;
+    
+    const appearedResult = await pool.query(appearedQuery);
+    
+    const appearedNumbers = new Set(
+      appearedResult.rows
+        .map((row) => {
+          const num = parseInt(row.num, 10);
+          return !isNaN(num) && num >= 1 && num <= 90 ? num : null;
+        })
+        .filter((n): n is number => n !== null)
+    );
 
-    const result = await pool.query(query);
-    return result.rows.map((row) => parseInt(row.number, 10));
+    // Return numbers 1-90 that are NOT in the appeared set
+    const sleeping: number[] = [];
+    for (let i = 1; i <= 90; i++) {
+      if (!appearedNumbers.has(i)) {
+        sleeping.push(i);
+      }
+    }
+
+    return sleeping;
   }
 
   // Get total draw count
