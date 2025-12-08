@@ -51,7 +51,10 @@ $$ LANGUAGE plpgsql;
 
 -- Co-occurrence tracking (optional, for advanced analytics)
 -- Tracks triplets (3 numbers) that appear together in draws
-CREATE TABLE IF NOT EXISTS number_cooccurrence (
+-- Drop existing table if it has old structure (pairs) and recreate with new structure (triplets)
+DROP TABLE IF EXISTS number_cooccurrence;
+
+CREATE TABLE number_cooccurrence (
   number1 INTEGER NOT NULL,
   number2 INTEGER NOT NULL,
   number3 INTEGER NOT NULL,

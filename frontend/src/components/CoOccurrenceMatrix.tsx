@@ -47,14 +47,14 @@ export const CoOccurrenceMatrix: React.FC<CoOccurrenceMatrixProps> = ({
       ) : (
         <div className="space-y-2">
           <div className="grid grid-cols-7 gap-2 text-xs font-medium text-gray-600 pb-2 border-b">
-            <div>Number 1</div>
-            <div>Number 2</div>
-            {hasTriplets && <div>Number 3</div>}
+            <div className="text-center">No-1</div>
+            <div className="text-center">No-2</div>
+            {hasTriplets && <div className="text-center">No-3</div>}
             {!hasTriplets && <div></div>}
             <div className="text-center">Type</div>
             <div className="text-center">Total</div>
-            <div className="text-center">Winning</div>
-            <div className="text-center">Machine</div>
+            <div className="text-center">Win</div>
+            <div className="text-center">Mac</div>
             <div className="text-right">Last Seen</div>
           </div>
           <div className="max-h-96 overflow-y-auto space-y-1">
@@ -69,10 +69,10 @@ export const CoOccurrenceMatrix: React.FC<CoOccurrenceMatrixProps> = ({
                   key={key}
                   className="grid grid-cols-7 gap-2 items-center py-2 px-2 rounded hover:bg-gray-50 transition-colors"
                 >
-                  <div className="font-semibold text-primary-600">{item.number1}</div>
-                  <div className="font-semibold text-primary-600">{item.number2}</div>
+                  <div className="text-center font-semibold text-primary-600">{item.number1}</div>
+                  <div className="text-center font-semibold text-primary-600">{item.number2}</div>
                   {isTriplet ? (
-                    <div className="font-semibold text-primary-600">{item.number3}</div>
+                    <div className="text-center font-semibold text-primary-600">{item.number3}</div>
                   ) : (
                     <div></div>
                   )}
