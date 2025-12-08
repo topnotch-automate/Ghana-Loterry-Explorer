@@ -44,7 +44,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = fals
             Only integers 1–90 are accepted. Max 10 numbers. Leave empty to show all draws.
             {mode === 'group' && (
               <span className="block mt-1 text-primary-600 font-medium">
-                Group mode: All entered numbers must appear together in a draw.
+                Group mode: At least 2 of the entered numbers must appear together in a draw (can be in winning, machine, or both).
               </span>
             )}
           </div>
@@ -77,7 +77,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = fals
               <option value="exact">Exact 10-Number Match</option>
               <option value="winning-only">Winning Panel Only</option>
               <option value="machine-only">Machine Panel Only</option>
-              <option value="group">Group Match (All numbers together)</option>
+              <option value="group">Group Match (2+ numbers together)</option>
             </select>
           </div>
 

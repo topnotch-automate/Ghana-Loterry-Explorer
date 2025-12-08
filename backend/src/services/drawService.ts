@@ -205,12 +205,13 @@ export class DrawService {
       params.push(numbers.length);
       paramIndex++;
     } else if (mode === 'group') {
-      // Group search: all numbers in the group must be present together
-      // Check if all numbers in the group appear in the draw
+      // Group search: at least 2 numbers from the group must appear together
+      // Numbers can be in winning, machine, or both panels
+      const groupMinMatches = Math.max(2, minMatches); // At least 2, or use minMatches if higher
       sqlQuery += ` AND (
         SELECT COUNT(*) FROM unnest(d.winning_numbers || d.machine_numbers) AS num WHERE num = ANY($1)
-      ) = $${paramIndex}`;
-      params.push(numbers.length);
+      ) >= $${paramIndex}`;
+      params.push(groupMinMatches);
       paramIndex++;
     } else if (mode === 'winning-only') {
       sqlQuery += ` AND (
