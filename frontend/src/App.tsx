@@ -5,6 +5,8 @@ import { Dashboard } from './pages/Dashboard';
 import { Search } from './pages/Search';
 import { Analytics } from './pages/Analytics';
 import { Import } from './pages/Import';
+import { Predictions } from './pages/Predictions';
+import { SubscriptionProvider } from './contexts/SubscriptionContext';
 
 const Navigation: React.FC = () => {
   const location = useLocation();
@@ -14,7 +16,7 @@ const Navigation: React.FC = () => {
 
   const isActive = (path: string) => location.pathname === path;
   const isAnyDropdownItemActive = () => {
-    return isActive('/search') || isActive('/analytics') || isActive('/import');
+    return isActive('/search') || isActive('/analytics') || isActive('/import') || isActive('/predictions');
   };
 
   // Close dropdown when clicking outside
@@ -43,6 +45,7 @@ const Navigation: React.FC = () => {
   const menuItems = [
     { path: '/search', label: 'Search' },
     { path: '/analytics', label: 'Analytics' },
+    { path: '/predictions', label: 'Predictions', pro: true },
     { path: '/import', label: 'Import' },
   ];
 
@@ -125,7 +128,14 @@ const Navigation: React.FC = () => {
                           role="menuitem"
                           onClick={() => setIsDropdownOpen(false)}
                         >
-                          {item.label}
+                          <div className="flex items-center justify-between">
+                            <span>{item.label}</span>
+                            {item.pro && (
+                              <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-accent-500 text-white rounded">
+                                Pro
+                              </span>
+                            )}
+                          </div>
                         </Link>
                       ))}
                     </div>
@@ -214,7 +224,14 @@ const Navigation: React.FC = () => {
                   }`}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
-                  {item.label}
+                  <div className="flex items-center justify-between">
+                    <span>{item.label}</span>
+                    {item.pro && (
+                      <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-accent-500 text-white rounded">
+                        Pro
+                      </span>
+                    )}
+                  </div>
                 </Link>
               ))}
             </div>
@@ -290,6 +307,14 @@ function App() {
             element={
               <ConditionalLayout>
                 <Import />
+              </ConditionalLayout>
+            }
+          />
+          <Route
+            path="/predictions"
+            element={
+              <ConditionalLayout>
+                <Predictions />
               </ConditionalLayout>
             }
           />

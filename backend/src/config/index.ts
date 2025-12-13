@@ -14,6 +14,9 @@ export const config = {
   logging: {
     level: process.env.LOG_LEVEL || 'info',
   },
+  pythonService: {
+    url: process.env.PYTHON_SERVICE_URL || 'http://localhost:5001',
+  },
 } as const;
 
 // Validate required environment variables

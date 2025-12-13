@@ -39,3 +39,15 @@ export class DatabaseError extends AppError {
   }
 }
 
+export class UnauthorizedError extends AppError {
+  constructor(message: string = 'Unauthorized', details?: unknown) {
+    super(401, message, 'UNAUTHORIZED', details);
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Forbidden', details?: unknown) {
+    super(403, message, 'FORBIDDEN', details);
+  }
+}
+

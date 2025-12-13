@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData } from '../types';
+import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData, PredictionResponse, SubscriptionStatus, PredictionStrategy } from '../types';
 import { API_CONFIG } from '../utils/constants';
 import { ApiError, handleApiError } from '../utils/errors';
 
@@ -9,6 +9,15 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: API_CONFIG.TIMEOUT,
+});
+
+// Add user ID header from localStorage (for MVP - replace with proper auth later)
+api.interceptors.request.use((config) => {
+  const userId = localStorage.getItem('userId');
+  if (userId) {
+    config.headers['x-user-id'] = userId;
+  }
+  return config;
 });
 
 // Response interceptor for error handling
@@ -71,6 +80,14 @@ export const drawsApi = {
       }
       throw error;
     }
+  },
+
+  getLottoTypes: async (): Promise<string[]> => {
+    const response = await api.get<ApiResponse<string[]>>('/draws/types');
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to fetch lotto types');
+    }
+    return response.data.data;
   },
 
   search: async (params: {
@@ -264,6 +281,95 @@ export const analyticsApi = {
       throw new ApiError(response.data.error || 'Failed to fetch co-occurrence dates');
     }
     return response.data.data || [];
+  },
+};
+
+// Predictions API (Pro users only)
+export const predictionsApi = {
+  getHealth: async (): Promise<{ available: boolean; message: string }> => {
+    const response = await api.get<ApiResponse<{ available: boolean; message: string }>>('/predictions/health');
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to check prediction service');
+    }
+    return response.data.data;
+  },
+
+  generate: async (params: {
+    strategy?: PredictionStrategy;
+    limit?: number;
+    lottoType?: string;
+    useTypeSpecificTable?: boolean;
+  }): Promise<PredictionResponse> => {
+    const searchParams: Record<string, string> = {};
+    if (params.strategy) searchParams.strategy = params.strategy;
+    if (params.limit) searchParams.limit = params.limit.toString();
+    if (params.lottoType) searchParams.lottoType = params.lottoType;
+    if (params.useTypeSpecificTable !== undefined) {
+      searchParams.useTypeSpecificTable = params.useTypeSpecificTable.toString();
+    }
+
+    const response = await api.post<ApiResponse<PredictionResponse>>('/predictions/generate', {}, {
+      params: searchParams,
+      timeout: 60000, // 60 seconds for predictions
+    });
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to generate predictions');
+    }
+    return response.data.data;
+  },
+
+  analyze: async (params?: {
+    limit?: number;
+    lottoType?: string;
+    useTypeSpecificTable?: boolean;
+  }): Promise<any> => {
+    const searchParams: Record<string, string> = {};
+    if (params?.limit) searchParams.limit = params.limit.toString();
+    if (params?.lottoType) searchParams.lottoType = params.lottoType;
+    if (params?.useTypeSpecificTable !== undefined) {
+      searchParams.useTypeSpecificTable = params.useTypeSpecificTable.toString();
+    }
+
+    const response = await api.post<ApiResponse<any>>('/predictions/analyze', {}, {
+      params: searchParams,
+      timeout: 30000,
+    });
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to analyze patterns');
+    }
+    return response.data.data;
+  },
+
+  getHistory: async (limit?: number): Promise<any[]> => {
+    const params: Record<string, string> = {};
+    if (limit) params.limit = limit.toString();
+
+    const response = await api.get<ApiResponse<any[]>>('/predictions/history', { params });
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to fetch prediction history');
+    }
+    return response.data.data;
+  },
+
+  getLottoTypes: async (): Promise<string[]> => {
+    const response = await api.get<ApiResponse<string[]>>('/predictions/lotto-types');
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to fetch lotto types');
+    }
+    return response.data.data;
+  },
+
+  getSubscriptionStatus: async (): Promise<SubscriptionStatus> => {
+    const response = await api.get<ApiResponse<SubscriptionStatus>>('/predictions/subscription-status');
+    if (!response.data.success || !response.data.data) {
+      // Default to free if not authenticated
+      return {
+        authenticated: false,
+        tier: 'free',
+        isPro: false,
+      };
+    }
+    return response.data.data;
   },
 };
 

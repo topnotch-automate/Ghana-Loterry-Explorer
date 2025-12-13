@@ -122,43 +122,69 @@ export const Analytics: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Analytics Dashboard</h1>
-          <p className="text-gray-600">
-            Analyze number frequency, patterns, and trends across different timeframes.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={handleExportCSV} className="btn-secondary text-sm">
-            Export CSV
-          </button>
-          <button onClick={handleExportJSON} className="btn-secondary text-sm">
-            Export JSON
-          </button>
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-primary-600 to-accent-500 rounded-xl p-6 text-white shadow-lg">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center text-2xl backdrop-blur-sm">
+              📈
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold">Analytics Dashboard</h1>
+              <p className="text-white/90 text-sm mt-1">
+                Analyze number frequency, patterns, and trends across different timeframes.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={handleExportCSV} 
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-all backdrop-blur-sm flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              CSV
+            </button>
+            <button 
+              onClick={handleExportJSON} 
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-all backdrop-blur-sm flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              JSON
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Timeframe Selector */}
-      <div className="card">
-        <div className="flex gap-4">
+      <div className="card border-2 border-gray-100">
+        <div className="flex items-center gap-2 mb-4">
+          <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h2 className="text-xl font-semibold text-gray-800">Timeframe</h2>
+        </div>
+        <div className="flex gap-3">
           <button
             onClick={() => setTimeframe('30')}
-            className={`px-4 py-2 rounded-md ${
+            className={`px-6 py-3 rounded-xl font-medium transition-all ${
               timeframe === '30'
-                ? 'bg-primary-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-gradient-to-r from-primary-600 to-accent-500 text-white shadow-lg transform scale-105'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:shadow-md'
             }`}
           >
             Last 30 Days
           </button>
           <button
             onClick={() => setTimeframe('365')}
-            className={`px-4 py-2 rounded-md ${
+            className={`px-6 py-3 rounded-xl font-medium transition-all ${
               timeframe === '365'
-                ? 'bg-primary-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-gradient-to-r from-primary-600 to-accent-500 text-white shadow-lg transform scale-105'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:shadow-md'
             }`}
           >
             Last 365 Days
@@ -186,36 +212,52 @@ export const Analytics: React.FC = () => {
 
       {/* Hot & Cold Numbers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-4">🔥 Hot Numbers (Last 30 Days)</h3>
+        <div className="card bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-10 h-10 bg-red-500 rounded-lg flex items-center justify-center text-xl">
+              🔥
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">Hot Numbers</h3>
+              <p className="text-xs text-gray-600">Last 30 Days</p>
+            </div>
+          </div>
           {hotNumbers.length === 0 ? (
-            <div className="text-gray-500">No data available</div>
+            <div className="text-gray-500 py-4">No data available</div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {hotNumbers.map((stat) => (
                 <div
                   key={stat.number}
-                  className="px-3 py-2 bg-red-100 text-red-700 rounded-full font-semibold"
+                  className="px-3 py-2 bg-gradient-to-r from-red-500 to-orange-500 text-white rounded-full font-bold shadow-md hover:shadow-lg transform hover:scale-110 transition-all"
                 >
-                  {stat.number} ({stat.totalCount})
+                  {stat.number} <span className="text-xs opacity-90">({stat.totalCount})</span>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-4">❄️ Cold Numbers (Last 30 Days)</h3>
+        <div className="card bg-gradient-to-br from-blue-50 to-cyan-50 border-2 border-blue-200">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-xl">
+              ❄️
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">Cold Numbers</h3>
+              <p className="text-xs text-gray-600">Last 30 Days</p>
+            </div>
+          </div>
           {coldNumbers.length === 0 ? (
-            <div className="text-gray-500">No data available</div>
+            <div className="text-gray-500 py-4">No data available</div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {coldNumbers.map((stat) => (
                 <div
                   key={stat.number}
-                  className="px-3 py-2 bg-blue-100 text-blue-700 rounded-full font-semibold"
+                  className="px-3 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full font-bold shadow-md hover:shadow-lg transform hover:scale-110 transition-all"
                 >
-                  {stat.number} ({stat.totalCount})
+                  {stat.number} <span className="text-xs opacity-90">({stat.totalCount})</span>
                 </div>
               ))}
             </div>
@@ -224,16 +266,26 @@ export const Analytics: React.FC = () => {
       </div>
 
       {/* Sleeping Numbers */}
-      <div className="card">
-        <h3 className="text-lg font-semibold mb-4">😴 Sleeping Numbers (Not seen in 30 days)</h3>
+      <div className="card bg-gradient-to-br from-gray-50 to-slate-50 border-2 border-gray-200">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-10 h-10 bg-gray-500 rounded-lg flex items-center justify-center text-xl">
+            😴
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Sleeping Numbers</h3>
+            <p className="text-xs text-gray-600">Never appeared in winning numbers</p>
+          </div>
+        </div>
         {sleepingNumbers.length === 0 ? (
-          <div className="text-gray-500">All numbers have appeared in the last 30 days</div>
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-green-800 font-medium">✨ All numbers 1-90 have appeared in winning numbers!</p>
+          </div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {sleepingNumbers.map((num) => (
               <div
                 key={num}
-                className="px-3 py-2 bg-gray-100 text-gray-600 rounded-full"
+                className="px-3 py-2 bg-gray-200 text-gray-700 rounded-full font-medium hover:bg-gray-300 transition-colors"
               >
                 {num}
               </div>
@@ -243,15 +295,35 @@ export const Analytics: React.FC = () => {
       </div>
 
       {/* Co-Occurrence Matrix */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold">Co-Occurrence Analysis</h2>
+      <div className="card border-2 border-gray-100">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+            </svg>
+            <h2 className="text-2xl font-bold text-gray-800">Co-Occurrence Analysis</h2>
+          </div>
           <button
             onClick={loadCoOccurrence}
             disabled={loadingCoOccurrence}
-            className="btn-secondary text-sm"
+            className="px-4 py-2 text-sm font-medium bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-primary-300 transition-all flex items-center gap-2 disabled:opacity-50"
           >
-            {loadingCoOccurrence ? 'Loading...' : 'Refresh'}
+            {loadingCoOccurrence ? (
+              <>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Loading...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+              </>
+            )}
           </button>
         </div>
         {loadingCoOccurrence ? (

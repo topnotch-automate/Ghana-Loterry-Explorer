@@ -1,17 +1,32 @@
 import pool from '../database/db.js';
 import { logger } from '../utils/logger.js';
 import type { Draw, CreateDrawInput, SearchQuery, SearchResult } from '../types/index.js';
+import { getLottoTypeTableName, getAvailableLottoTypes } from '../utils/lottoTypeUtils.js';
 
 export class DrawService {
   // Get all draws with optional filters
+  // If useTypeSpecificTable is true and lottoType is provided, queries the type-specific table
   async getDraws(filters?: {
     startDate?: string;
     endDate?: string;
     lottoType?: string;
     limit?: number;
     offset?: number;
+    useTypeSpecificTable?: boolean; // New: use type-specific table if available
   }): Promise<Draw[]> {
-    let query = 'SELECT * FROM draws WHERE 1=1';
+    // Determine which table to query
+    let tableName = 'draws';
+    if (filters?.useTypeSpecificTable && filters?.lottoType) {
+      const typeTableName = getLottoTypeTableName(filters.lottoType);
+      // Check if type-specific table exists
+      const tableExists = await this.checkTableExists(typeTableName);
+      if (tableExists) {
+        tableName = typeTableName;
+        logger.debug(`Using type-specific table: ${tableName}`);
+      }
+    }
+
+    let query = `SELECT * FROM ${tableName} WHERE 1=1`;
     const params: unknown[] = [];
     let paramIndex = 1;
 
@@ -27,7 +42,8 @@ export class DrawService {
       paramIndex++;
     }
 
-    if (filters?.lottoType) {
+    // If using type-specific table, lotto_type filter is implicit
+    if (filters?.lottoType && !filters?.useTypeSpecificTable) {
       query += ` AND lotto_type = $${paramIndex}`;
       params.push(filters.lottoType);
       paramIndex++;
@@ -49,6 +65,34 @@ export class DrawService {
 
     const result = await pool.query(query, params);
     return this.mapRowsToDraws(result.rows);
+  }
+
+  // Check if a table exists
+  private async checkTableExists(tableName: string): Promise<boolean> {
+    try {
+      const result = await pool.query(
+        `SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = $1
+        )`,
+        [tableName]
+      );
+      return result.rows[0].exists;
+    } catch (error) {
+      logger.error(`Error checking table existence: ${tableName}`, error);
+      return false;
+    }
+  }
+
+  // Get available lotto types
+  async getAvailableLottoTypes(): Promise<string[]> {
+    const types = await getAvailableLottoTypes(pool);
+    logger.info(`Found ${types.length} distinct lotto types in database`);
+    if (types.length > 0) {
+      logger.debug(`Lotto types: ${types.join(', ')}`);
+    }
+    return types;
   }
 
   // Get single draw by ID

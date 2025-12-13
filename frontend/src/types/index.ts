@@ -61,3 +61,36 @@ export interface ApiResponse<T> {
 
 export type SearchMode = 'exact' | 'partial' | 'winning-only' | 'machine-only' | 'group';
 
+export interface PredictionSet {
+  numbers: number[];
+  sum: number;
+  evens: number;
+  highs: number;
+}
+
+export interface PredictionResponse {
+  success: boolean;
+  predictions: {
+    ml?: PredictionSet[];
+    genetic?: PredictionSet[];
+    pattern?: PredictionSet[];
+    ensemble?: PredictionSet[];
+  };
+  strategy: string;
+  regime_change?: {
+    detected: boolean;
+    confidence: number;
+    details?: Record<string, string>;
+  };
+  data_points_used: number;
+}
+
+export interface SubscriptionStatus {
+  authenticated: boolean;
+  tier: 'free' | 'pro';
+  isPro: boolean;
+  email?: string;
+}
+
+export type PredictionStrategy = 'ensemble' | 'ml' | 'genetic' | 'pattern';
+

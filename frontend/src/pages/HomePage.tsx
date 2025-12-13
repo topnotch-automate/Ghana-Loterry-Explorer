@@ -145,97 +145,142 @@ export const HomePage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Ghana Lottery Explorer</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Search draws, spot repeats, and explore analytics
-          </p>
+      <div className="bg-gradient-to-r from-primary-600 to-accent-500 rounded-xl p-6 text-white shadow-lg">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center text-2xl backdrop-blur-sm">
+            🎲
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold">Ghana Lottery Explorer</h1>
+            <p className="text-white/90 text-sm mt-1">
+              Search draws, spot repeats, and explore analytics
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Search Section */}
-      <div className="card">
-        <div className="flex flex-col md:flex-row md:items-center md:gap-4">
+      <div className="card border-2 border-gray-100">
+        <div className="flex items-center gap-2 mb-4">
+          <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <h2 className="text-xl font-semibold text-gray-800">Search Draws</h2>
+        </div>
+        <div className="flex flex-col md:flex-row md:items-end md:gap-4">
           <div className="flex-1">
-            <label className="text-sm text-gray-600 mb-2 block">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Search numbers (comma or space separated)
             </label>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="e.g. 3,12,19"
-              className="input-field"
-            />
+            <div className="relative">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="e.g. 3, 12, 19"
+                className="input-field pl-10"
+              />
+              <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
           </div>
           <div className="mt-3 md:mt-0 flex items-center gap-3">
-            <div className="text-sm text-gray-600">Mode</div>
+            <label className="text-sm font-medium text-gray-700">Mode</label>
             <select
               value={matchMode}
               onChange={(e) => setMatchMode(e.target.value as 'exact' | 'partial')}
-              className="input-field w-auto"
+              className="input-field w-auto min-w-[140px]"
             >
               <option value="partial">Partial match</option>
               <option value="exact">Exact match</option>
             </select>
-            <div className="text-sm text-gray-500">
-              Results: <span className="font-medium">{results.length}</span>
+            <div className="px-3 py-2 bg-primary-50 text-primary-700 rounded-lg text-sm font-semibold">
+              {results.length} result{results.length !== 1 ? 's' : ''}
             </div>
           </div>
         </div>
-        <div className="mt-3 text-xs text-gray-500">
-          Tip: leave search empty to show recent draws. Use exact mode to find draws with the exact
-          set.
+        {parsedQuery.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {parsedQuery.map((num) => (
+              <span key={num} className="px-2.5 py-1 bg-primary-100 text-primary-700 rounded-full text-sm font-medium">
+                {num}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-xs text-blue-800">
+            💡 <strong>Tip:</strong> Leave search empty to show recent draws. Use exact mode to find draws with the exact number set.
+          </p>
         </div>
       </div>
 
       {/* Results list */}
-      <div className="card">
-        <h2 className="text-xl font-semibold mb-4">Search Results</h2>
+      <div className="card border-2 border-gray-100">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <h2 className="text-xl font-semibold text-gray-800">Search Results</h2>
+          </div>
+          {results.length > 0 && (
+            <span className="px-3 py-1 bg-primary-100 text-primary-700 rounded-full text-sm font-medium">
+              {results.length} found
+            </span>
+          )}
+        </div>
         {isSearching ? (
-          <div className="text-center py-8">
-            <LoadingSpinner message="Searching..." />
+          <div className="text-center py-12">
+            <LoadingSpinner message="Searching draws..." />
           </div>
         ) : results.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">
-            No results. Try adjusting your numbers or mode.
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p className="text-gray-600 font-medium mb-2">No results found</p>
+            <p className="text-sm text-gray-500">Try adjusting your search numbers or match mode</p>
           </div>
         ) : (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {paginatedResults.map((d) => (
-                <DrawCard
-                  key={d.id}
-                  draw={d}
-                  queryNumbers={parsedQuery}
-                  onClick={() => setSelectedDraw(d)}
-                />
+              {paginatedResults.map((d, index) => (
+                <div key={d.id} className="animate-slide-up" style={{ animationDelay: `${index * 50}ms` }}>
+                  <DrawCard
+                    draw={d}
+                    queryNumbers={parsedQuery}
+                    onClick={() => setSelectedDraw(d)}
+                  />
+                </div>
               ))}
             </div>
             {totalPages > 1 && (
-              <div className="mt-6 flex items-center justify-between">
+              <div className="mt-6 pt-6 border-t border-gray-200 flex items-center justify-between">
                 <div className="text-sm text-gray-600">
-                  Showing {startIndex + 1}-{Math.min(endIndex, results.length)} of {results.length} results
+                  Showing <span className="font-medium">{startIndex + 1}</span> to <span className="font-medium">{Math.min(endIndex, results.length)}</span> of <span className="font-medium">{results.length}</span> results
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
-                    Previous
+                    ← Previous
                   </button>
-                  <span className="text-sm text-gray-700">
+                  <span className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-50 rounded-lg">
                     Page {currentPage} of {totalPages}
                   </span>
                   <button
                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
-                    Next
+                    Next →
                   </button>
                 </div>
               </div>
@@ -246,8 +291,18 @@ export const HomePage: React.FC = () => {
 
       {/* Most Recent Draw */}
       {latestDraw && (
-        <div>
-          <h2 className="text-2xl font-bold mb-4">Most Recent Draw</h2>
+        <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">Most Recent Draw</h2>
+              <p className="text-sm text-gray-600">Latest lottery results</p>
+            </div>
+          </div>
           <div className="flex justify-center">
             <div className="w-full max-w-md">
               <DrawCard
@@ -260,8 +315,13 @@ export const HomePage: React.FC = () => {
       )}
 
       {/* Frequency Analytics */}
-      <div>
-        <h2 className="text-2xl font-bold mb-4">Analytics (Last 30 Days)</h2>
+      <div className="card border-2 border-gray-100">
+        <div className="flex items-center gap-2 mb-6">
+          <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          <h2 className="text-2xl font-bold text-gray-800">Analytics (Last 30 Days)</h2>
+        </div>
         <FrequencyChart data={frequencyStats} maxItems={20} />
       </div>
 
@@ -270,3 +330,4 @@ export const HomePage: React.FC = () => {
     </div>
   );
 };
+

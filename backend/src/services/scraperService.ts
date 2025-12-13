@@ -371,7 +371,6 @@ export class ScraperService {
    * Uses unified date parser to handle ambiguous formats consistently
    */
   private parseDate(dateStr: string): string {
-    const { parseAndNormalizeDate } = await import('../utils/dateParser.js');
     return parseAndNormalizeDate(dateStr);
   }
 

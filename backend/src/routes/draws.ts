@@ -87,56 +87,8 @@ router.get('/search', async (req, res, next) => {
   }
 });
 
-// GET /api/draws/:id - Get draw by ID
-router.get('/:id', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const draw = await drawService.getDrawById(id);
-
-    if (!draw) {
-      throw new NotFoundError('Draw', id);
-    }
-
-    res.json({ success: true, data: draw });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/draws - Create new draw
-router.post('/', async (req, res, next) => {
-  try {
-    // Validate input using Zod schema
-    const input = validate(createDrawSchema, req.body) as CreateDrawInput;
-
-    const draw = await drawService.createDraw(input);
-    res.status(201).json({ success: true, data: draw });
-  } catch (error: any) {
-    // Handle unique constraint violation
-    if (error.code === '23505') {
-      return next(new ConflictError('Draw with this date and type already exists'));
-    }
-    next(error);
-  }
-});
-
-// GET /api/draws/:id/similar - Find similar draws (previous occurrences)
-router.get('/:id/similar', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const minMatches = req.query.minMatches
-      ? parseInt(req.query.minMatches as string, 10)
-      : 3;
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
-
-    const similarDraws = await drawService.findSimilarDraws(id, minMatches, limit);
-    res.json({ success: true, data: similarDraws, count: similarDraws.length });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // GET /api/draws/export - Export draws as CSV or JSON
+// IMPORTANT: This route must be defined BEFORE /:id to prevent "export" from being parsed as an ID
 router.get('/export', async (req, res, next) => {
   try {
     const format = (req.query.format as string) || 'json';
@@ -190,6 +142,68 @@ router.get('/export', async (req, res, next) => {
       res.setHeader('Content-Disposition', 'attachment; filename=draws-export.json');
       res.json({ success: true, data: draws, count: draws.length });
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/draws/types - Get all available lotto types
+// IMPORTANT: This route must be defined BEFORE /:id to prevent "types" from being parsed as an ID
+router.get('/types', async (req, res, next) => {
+  try {
+    const lottoTypes = await drawService.getAvailableLottoTypes();
+    logger.info(`Returning ${lottoTypes.length} lotto types: ${lottoTypes.join(', ')}`);
+    res.json({ success: true, data: lottoTypes, count: lottoTypes.length });
+  } catch (error) {
+    logger.error('Error fetching lotto types', error);
+    next(error);
+  }
+});
+
+// GET /api/draws/:id - Get draw by ID
+router.get('/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const draw = await drawService.getDrawById(id);
+
+    if (!draw) {
+      throw new NotFoundError('Draw', id);
+    }
+
+    res.json({ success: true, data: draw });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/draws - Create new draw
+router.post('/', async (req, res, next) => {
+  try {
+    // Validate input using Zod schema
+    const input = validate(createDrawSchema, req.body) as CreateDrawInput;
+
+    const draw = await drawService.createDraw(input);
+    res.status(201).json({ success: true, data: draw });
+  } catch (error: any) {
+    // Handle unique constraint violation
+    if (error.code === '23505') {
+      return next(new ConflictError('Draw with this date and type already exists'));
+    }
+    next(error);
+  }
+});
+
+// GET /api/draws/:id/similar - Find similar draws (previous occurrences)
+router.get('/:id/similar', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const minMatches = req.query.minMatches
+      ? parseInt(req.query.minMatches as string, 10)
+      : 3;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+
+    const similarDraws = await drawService.findSimilarDraws(id, minMatches, limit);
+    res.json({ success: true, data: similarDraws, count: similarDraws.length });
   } catch (error) {
     next(error);
   }

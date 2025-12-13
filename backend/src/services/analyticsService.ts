@@ -116,42 +116,30 @@ export class AnalyticsService {
     return winningStats.filter((s) => s.totalCount < avgCount || s.totalCount === 0).slice(0, 10);
   }
 
-  // Get sleeping numbers (not appeared in X days)
-  // Logic: All numbers 1-90 are "asleep" except those that appeared in winning OR machine within the timeframe
+  // Get sleeping numbers (not appeared in winning numbers)
+  // Logic: All numbers 1-90 that have NEVER appeared in winning numbers are "sleeping"
+  // Only checks winning numbers, not machine numbers
   async getSleepingNumbers(days: number = 30): Promise<number[]> {
     try {
-      // First, check if there are any draws in the period
-      const drawsCheckQuery = `
-        SELECT COUNT(*) as count
-        FROM draws
-        WHERE draw_date >= CURRENT_DATE - INTERVAL '${days} days'
-      `;
-      
+      // First, check if there are any draws at all
+      const drawsCheckQuery = `SELECT COUNT(*) as count FROM draws`;
       const drawsCheck = await pool.query(drawsCheckQuery);
       const drawCount = parseInt(drawsCheck.rows[0]?.count || '0', 10);
       
-      // If no draws exist in the period, return empty array (not all numbers)
+      // If no draws exist, all numbers 1-90 are sleeping
       if (drawCount === 0) {
-        return [];
+        return Array.from({ length: 90 }, (_, i) => i + 1);
       }
       
-      // Get all numbers that HAVE appeared in winning OR machine in the last X days
-      // Use a simpler approach: get distinct numbers from both arrays
+      // Get all numbers that HAVE appeared in WINNING numbers (checking ALL historical data)
+      // Only check winning_numbers, NOT machine_numbers
       const appearedQuery = `
-        WITH all_numbers AS (
-          SELECT DISTINCT num
-          FROM (
-            SELECT unnest(winning_numbers) AS num
-            FROM draws
-            WHERE draw_date >= CURRENT_DATE - INTERVAL '${days} days'
-            UNION
-            SELECT unnest(machine_numbers) AS num
-            FROM draws
-            WHERE draw_date >= CURRENT_DATE - INTERVAL '${days} days'
-          ) AS combined
-          WHERE num BETWEEN 1 AND 90
-        )
-        SELECT num FROM all_numbers
+        SELECT DISTINCT num
+        FROM (
+          SELECT unnest(winning_numbers) AS num
+          FROM draws
+        ) AS winning_nums
+        WHERE num BETWEEN 1 AND 90
         ORDER BY num
       `;
       
@@ -161,7 +149,7 @@ export class AnalyticsService {
         appearedResult.rows.map((row) => parseInt(row.num, 10))
       );
       
-      // Return all numbers 1-90 that have NOT appeared (these are "sleeping")
+      // Return all numbers 1-90 that have NOT appeared in winning numbers (these are "sleeping")
       const allNumbers = Array.from({ length: 90 }, (_, i) => i + 1);
       const sleeping = allNumbers.filter((num) => !appearedNumbers.has(num));
       

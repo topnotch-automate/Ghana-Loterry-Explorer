@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import drawsRouter from './routes/draws.js';
 import analyticsRouter from './routes/analytics.js';
+import predictionsRouter from './routes/predictions.js';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
 import { AppError } from './utils/errors.js';
@@ -13,7 +14,10 @@ app.use(cors({
   origin: config.cors.origin,
   credentials: true,
 }));
-app.use(express.json());
+// JSON body parser with error handling for "null" string
+app.use(express.json({
+  strict: false,
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
@@ -34,9 +38,17 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/draws', drawsRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/predictions', predictionsRouter);
 
 // Error handling middleware
 app.use((err: Error | AppError, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Handle JSON parse errors (e.g., when body is "null" string)
+  if (err instanceof SyntaxError && 'body' in err && err.message.includes('JSON')) {
+    logger.warn('JSON parse error, treating as empty body', err);
+    req.body = {};
+    return next();
+  }
+
   if (err instanceof AppError) {
     logger.warn(`AppError: ${err.message}`, err);
     return res.status(err.statusCode).json({
