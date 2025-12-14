@@ -75,6 +75,7 @@ export interface PredictionResponse {
     genetic?: PredictionSet[];
     pattern?: PredictionSet[];
     ensemble?: PredictionSet[];
+    intelligence?: PredictionSet[]; // Added for intelligence strategy
   };
   strategy: string;
   regime_change?: {
@@ -92,5 +93,5 @@ export interface SubscriptionStatus {
   email?: string;
 }
 
-export type PredictionStrategy = 'ensemble' | 'ml' | 'genetic' | 'pattern';
+export type PredictionStrategy = 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence';
 

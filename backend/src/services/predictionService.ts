@@ -1,11 +1,12 @@
 import axios from 'axios';
-import { logger } from '../utils/logger.js';
-import { config } from '../config/index.js';
-import type { Draw } from '../types/index.js';
+import { logger } from '../utils/logger.ts';
+import { config } from '../config/index.ts';
+import type { Draw } from '../types/index.ts';
 
 interface PredictionRequest {
   draws: number[][];
-  strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern';
+  machine_draws?: number[][]; // Machine numbers for intelligence engine
+  strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence';
   n_predictions?: number;
 }
 
@@ -13,6 +14,13 @@ interface PredictionResponse {
   success: boolean;
   predictions: {
     [key: string]: Array<{
+      numbers: number[];
+      sum: number;
+      evens: number;
+      highs: number;
+    }>;
+    // Explicitly include intelligence for type safety
+    intelligence?: Array<{
       numbers: number[];
       sum: number;
       evens: number;
@@ -38,10 +46,53 @@ export class PredictionService {
   }
 
   /**
-   * Convert database draws to Python format (winning numbers only)
+   * Convert database draws to Python format (winning and machine numbers)
+   * For intelligence strategy, filters to only include draws with valid machine numbers
    */
-  private convertDrawsToPythonFormat(draws: Draw[]): number[][] {
-    return draws.map((draw) => [...draw.winningNumbers].sort((a, b) => a - b));
+  private convertDrawsToPythonFormat(
+    draws: Draw[], 
+    strategy?: 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence'
+  ): { 
+    winning: number[][]; 
+    machine: number[][];
+    filteredCount?: number;
+  } {
+    // For intelligence strategy, filter to only include draws with valid machine numbers
+    if (strategy === 'intelligence') {
+      const filtered = draws.filter(draw => 
+        draw.machineNumbers && 
+        Array.isArray(draw.machineNumbers) && 
+        draw.machineNumbers.length === 5 &&
+        draw.machineNumbers.every(n => typeof n === 'number' && n >= 1 && n <= 90)
+      );
+      
+      if (filtered.length < 50) {
+        logger.warn(
+          `Only ${filtered.length} draws have valid machine numbers (need at least 50 for intelligence strategy). ` +
+          `Original draw count: ${draws.length}`
+        );
+      } else {
+        logger.info(
+          `Filtered to ${filtered.length} draws with valid machine numbers (from ${draws.length} total)`
+        );
+      }
+      
+      return {
+        winning: filtered.map((draw) => [...draw.winningNumbers].sort((a, b) => a - b)),
+        machine: filtered.map((draw) => [...draw.machineNumbers].sort((a, b) => a - b)),
+        filteredCount: filtered.length,
+      };
+    }
+    
+    // For other strategies, include all draws (machine numbers optional)
+    return {
+      winning: draws.map((draw) => [...draw.winningNumbers].sort((a, b) => a - b)),
+      machine: draws.map((draw) => 
+        draw.machineNumbers && draw.machineNumbers.length === 5
+          ? [...draw.machineNumbers].sort((a, b) => a - b)
+          : [] // Empty array for draws without machine numbers
+      ),
+    };
   }
 
   /**
@@ -115,7 +166,7 @@ export class PredictionService {
    */
   async generatePredictions(
     draws: Draw[],
-    strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' = 'ensemble',
+    strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence' = 'ensemble',
     n_predictions: number = 3
   ): Promise<PredictionResponse> {
     try {
@@ -126,12 +177,21 @@ export class PredictionService {
         );
       }
 
-      // Convert to Python format
-      const pythonDraws = this.convertDrawsToPythonFormat(draws);
+      // Convert to Python format (filters for intelligence strategy)
+      const { winning, machine, filteredCount } = this.convertDrawsToPythonFormat(draws, strategy);
+
+      // Check minimum data requirement after filtering (for intelligence strategy)
+      if (strategy === 'intelligence' && filteredCount !== undefined && filteredCount < 50) {
+        throw new Error(
+          `Insufficient data with machine numbers: Need at least 50 draws with valid machine numbers. ` +
+          `Found ${filteredCount} draws with machine numbers out of ${draws.length} total draws.`
+        );
+      }
 
       // Call Python service
       const request: PredictionRequest = {
-        draws: pythonDraws,
+        draws: winning,
+        machine_draws: machine, // Include machine numbers for intelligence engine
         strategy,
         n_predictions,
       };

@@ -13,6 +13,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({ title, predictio
     ml: 'from-blue-500 to-cyan-500',
     genetic: 'from-green-500 to-emerald-500',
     pattern: 'from-orange-500 to-red-500',
+    intelligence: 'from-indigo-500 to-purple-500',
   };
 
   return (

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { drawService } from '../services/drawService.js';
-import { predictionService } from '../services/predictionService.js';
-import { requireAuth, requirePro, optionalAuth } from '../middleware/auth.js';
-import { logger } from '../utils/logger.js';
-import pool from '../database/db.js';
+import { drawService } from '../services/drawService.ts';
+import { predictionService } from '../services/predictionService.ts';
+import { requireAuth, requirePro, optionalAuth } from '../middleware/auth.ts';
+import { logger } from '../utils/logger.ts';
+import pool from '../database/db.ts';
 
 const router = Router();
 
@@ -33,7 +33,7 @@ router.get('/health', async (req, res, next) => {
  * Generate predictions (Pro users only)
  * 
  * Query params:
- * - strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' (default: 'ensemble')
+ * - strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence' (default: 'ensemble')
  * - limit: number of historical draws to use (default: all)
  * - lottoType: filter by lotto type
  * - useTypeSpecificTable: 'true' to use type-specific table for better accuracy (default: 'false')
@@ -65,19 +65,84 @@ router.post('/generate', requireAuth, requirePro, async (req, res, next) => {
     // Generate predictions
     const predictions = await predictionService.generatePredictions(
       draws,
-      strategy as 'ensemble' | 'ml' | 'genetic' | 'pattern'
+      strategy as 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence'
     );
 
-    // Save to prediction history
-    try {
-      await pool.query(
-        `INSERT INTO prediction_history (user_id, strategy, prediction_data)
-         VALUES ($1, $2, $3)`,
-        [userId, strategy, JSON.stringify(predictions)]
-      );
-    } catch (error) {
-      // Log but don't fail the request
-      logger.warn('Failed to save prediction history', error);
+    // Extract predicted numbers from the strategy-specific prediction set
+    // For intelligence strategy, specifically look for 'intelligence' key
+    let predictedNumbers: number[] = [];
+    
+    // Debug: Log the structure of predictions
+    logger.debug(`Extracting predictions for strategy: ${strategy}`);
+    logger.debug(`Available prediction keys: ${Object.keys(predictions.predictions).join(', ')}`);
+    logger.debug(`Full predictions object: ${JSON.stringify(predictions.predictions, null, 2)}`);
+    
+    if (strategy === 'intelligence') {
+      // For intelligence strategy, specifically look for 'intelligence' key
+      if (predictions.predictions.intelligence) {
+        logger.debug(`Found intelligence key in predictions`);
+        logger.debug(`intelligence value: ${JSON.stringify(predictions.predictions.intelligence)}`);
+        predictedNumbers = predictions.predictions.intelligence[0]?.numbers || [];
+        logger.debug(`Extracted intelligence numbers: ${JSON.stringify(predictedNumbers)}`);
+      } else {
+        logger.warn(`Strategy is 'intelligence' but 'intelligence' key not found in predictions`);
+      }
+    } else {
+      // For other strategies (including ensemble), use the strategy-specific key
+      const strategyKey = strategy as keyof typeof predictions.predictions;
+      if (predictions.predictions[strategyKey]) {
+        logger.debug(`Found ${strategyKey} key in predictions`);
+        predictedNumbers = predictions.predictions[strategyKey]?.[0]?.numbers || [];
+        logger.debug(`Extracted ${strategyKey} numbers: ${JSON.stringify(predictedNumbers)}`);
+      } else {
+        // Fallback: use the first available prediction set
+        logger.warn(`Strategy key '${strategyKey}' not found, using first available key`);
+        const firstPredictionKey = Object.keys(predictions.predictions)[0];
+        logger.debug(`Using first available key: ${firstPredictionKey}`);
+        predictedNumbers = predictions.predictions[firstPredictionKey as keyof typeof predictions.predictions]?.[0]?.numbers || [];
+      }
+    }
+    
+    // Log for debugging
+    if (predictedNumbers.length === 0) {
+      logger.warn(`No predicted numbers extracted for strategy: ${strategy}. Available keys: ${Object.keys(predictions.predictions).join(', ')}`);
+      logger.warn(`Full predictions structure: ${JSON.stringify(predictions, null, 2)}`);
+    } else {
+      logger.info(`Successfully extracted ${predictedNumbers.length} numbers for strategy: ${strategy}`);
+    }
+
+    // Auto-save to prediction history (optional, doesn't prevent manual saves)
+    // Users can still manually save the same prediction if they want
+    if (predictedNumbers.length === 5) {
+      try {
+        const result = await pool.query(
+          `INSERT INTO prediction_history (
+            user_id, strategy, prediction_data, lotto_type, 
+            predicted_numbers, target_draw_date
+           )
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, created_at`,
+          [
+            userId, 
+            strategy, 
+            JSON.stringify(predictions),
+            lottoType as string || null,
+            predictedNumbers,
+            new Date().toISOString().split('T')[0] // Today's date as target
+          ]
+        );
+        logger.info(`Auto-saved prediction for user ${userId}, prediction ID: ${result.rows[0].id}`);
+      } catch (error: any) {
+        // Log but don't fail the request - allow manual saves even if auto-save fails
+        // This could be a duplicate or any other error, but we don't want to block the user
+        if (error.code === '23505') {
+          logger.debug(`Prediction already auto-saved, user can still save manually if needed`);
+        } else {
+          logger.warn('Failed to auto-save prediction history', error);
+        }
+      }
+    } else {
+      logger.warn(`Skipping auto-save: invalid prediction numbers (length: ${predictedNumbers.length})`);
     }
 
     res.json({
@@ -132,8 +197,46 @@ router.post('/analyze', requireAuth, requirePro, async (req, res, next) => {
 });
 
 /**
+ * DELETE /api/predictions/:predictionId
+ * Delete a saved prediction (authenticated users, can only delete their own)
+ */
+router.delete('/:predictionId', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const predictionId = req.params.predictionId;
+
+    // Verify prediction belongs to user
+    const predCheck = await pool.query(
+      `SELECT id FROM prediction_history WHERE id = $1 AND user_id = $2`,
+      [predictionId, userId]
+    );
+
+    if (predCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Prediction not found',
+        message: 'Prediction does not exist or you do not have permission to delete it',
+      });
+    }
+
+    // Delete the prediction
+    await pool.query(
+      `DELETE FROM prediction_history WHERE id = $1 AND user_id = $2`,
+      [predictionId, userId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Prediction deleted successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /api/predictions/history
- * Get user's prediction history (authenticated users)
+ * Get user's prediction history with win/loss status (authenticated users)
  */
 router.get('/history', requireAuth, async (req, res, next) => {
   try {
@@ -141,18 +244,181 @@ router.get('/history', requireAuth, async (req, res, next) => {
     const limit = parseInt(req.query.limit as string, 10) || 20;
 
     const result = await pool.query(
-      `SELECT id, strategy, prediction_data, created_at
-       FROM prediction_history
-       WHERE user_id = $1
-       ORDER BY created_at DESC
+      `SELECT 
+        ph.id, 
+        ph.strategy, 
+        ph.prediction_data, 
+        ph.lotto_type,
+        ph.predicted_numbers,
+        ph.target_draw_date,
+        ph.matches,
+        ph.is_checked,
+        ph.checked_at,
+        ph.created_at,
+        d.id as actual_draw_id,
+        d.draw_date as actual_draw_date,
+        d.winning_numbers as actual_winning_numbers
+       FROM prediction_history ph
+       LEFT JOIN draws d ON ph.actual_draw_id = d.id
+       WHERE ph.user_id = $1
+       ORDER BY ph.created_at DESC
        LIMIT $2`,
       [userId, limit]
     );
 
+    // Format the response with win/loss indicators
+    const formattedData = result.rows.map(row => ({
+      id: row.id,
+      strategy: row.strategy,
+      predictionData: row.prediction_data,
+      lottoType: row.lotto_type,
+      predictedNumbers: row.predicted_numbers,
+      targetDrawDate: row.target_draw_date,
+      matches: row.matches || 0,
+      isChecked: row.is_checked,
+      checkedAt: row.checked_at,
+      createdAt: row.created_at,
+      actualDraw: row.actual_draw_id ? {
+        id: row.actual_draw_id,
+        drawDate: row.actual_draw_date,
+        winningNumbers: row.actual_winning_numbers,
+      } : null,
+      // Win/loss indicator: 3+ matches is considered a "win"
+      status: row.is_checked 
+        ? (row.matches >= 3 ? 'win' : row.matches >= 1 ? 'partial' : 'loss')
+        : 'pending',
+    }));
+
     res.json({
       success: true,
-      data: result.rows,
-      count: result.rows.length,
+      data: formattedData,
+      count: formattedData.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/predictions/save
+ * Save a prediction manually (for future reference)
+ */
+router.post('/save', requireAuth, requirePro, async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const { numbers, strategy, lottoType, targetDrawDate } = req.body;
+
+    if (!numbers || !Array.isArray(numbers) || numbers.length !== 5) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid prediction',
+        message: 'Must provide exactly 5 numbers',
+      });
+    }
+
+    // Validate numbers are in range 1-90
+    if (!numbers.every(n => Number.isInteger(n) && n >= 1 && n <= 90)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid numbers',
+        message: 'All numbers must be between 1 and 90',
+      });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO prediction_history (
+        user_id, strategy, predicted_numbers, lotto_type, target_draw_date,
+        prediction_data
+       )
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, created_at`,
+      [
+        userId,
+        strategy || 'manual',
+        numbers.sort((a, b) => a - b),
+        lottoType || null,
+        targetDrawDate || new Date().toISOString().split('T')[0],
+        JSON.stringify({ manual: true, numbers }),
+      ]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        id: result.rows[0].id,
+        numbers: numbers.sort((a, b) => a - b),
+        createdAt: result.rows[0].created_at,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/predictions/check/:predictionId
+ * Manually check a prediction against a specific draw
+ */
+router.post('/check/:predictionId', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const predictionId = req.params.predictionId;
+    const { drawId } = req.body;
+
+    if (!drawId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing draw ID',
+        message: 'Must provide drawId to check against',
+      });
+    }
+
+    // Verify prediction belongs to user
+    const predCheck = await pool.query(
+      `SELECT id FROM prediction_history WHERE id = $1 AND user_id = $2`,
+      [predictionId, userId]
+    );
+
+    if (predCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Prediction not found',
+        message: 'Prediction does not exist or does not belong to you',
+      });
+    }
+
+    // Check prediction against draw
+    const result = await pool.query(
+      `SELECT check_prediction_against_draw($1, $2) as matches`,
+      [predictionId, drawId]
+    );
+
+    // Get updated prediction data
+    const updated = await pool.query(
+      `SELECT 
+        ph.*,
+        d.draw_date as actual_draw_date,
+        d.winning_numbers as actual_winning_numbers
+       FROM prediction_history ph
+       LEFT JOIN draws d ON ph.actual_draw_id = d.id
+       WHERE ph.id = $1`,
+      [predictionId]
+    );
+
+    const row = updated.rows[0];
+    const matches = result.rows[0].matches;
+
+    res.json({
+      success: true,
+      data: {
+        predictionId,
+        matches,
+        predictedNumbers: row.predicted_numbers,
+        actualWinningNumbers: row.actual_winning_numbers,
+        status: matches >= 3 ? 'win' : matches >= 1 ? 'partial' : 'loss',
+        isChecked: row.is_checked,
+        checkedAt: row.checked_at,
+      },
     });
   } catch (error) {
     next(error);

@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData, PredictionResponse, SubscriptionStatus, PredictionStrategy } from '../types';
+import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData, PredictionResponse, SubscriptionStatus, PredictionStrategy, SavedPrediction } from '../types';
 import { API_CONFIG } from '../utils/constants';
 import { ApiError, handleApiError } from '../utils/errors';
 
@@ -364,15 +364,22 @@ export const predictionsApi = {
     return response.data.data;
   },
 
-  getHistory: async (limit?: number): Promise<any[]> => {
+  getHistory: async (limit?: number): Promise<SavedPrediction[]> => {
     const params: Record<string, string> = {};
     if (limit) params.limit = limit.toString();
 
-    const response = await api.get<ApiResponse<any[]>>('/predictions/history', { params });
+    const response = await api.get<ApiResponse<SavedPrediction[]>>('/predictions/history', { params });
     if (!response.data.success || !response.data.data) {
       throw new ApiError(response.data.error || 'Failed to fetch prediction history');
     }
     return response.data.data;
+  },
+
+  deletePrediction: async (predictionId: string): Promise<void> => {
+    const response = await api.delete<ApiResponse<void>>(`/predictions/${predictionId}`);
+    if (!response.data.success) {
+      throw new ApiError(response.data.error || 'Failed to delete prediction');
+    }
   },
 
   getLottoTypes: async (): Promise<string[]> => {
@@ -392,6 +399,40 @@ export const predictionsApi = {
         tier: 'free',
         isPro: false,
       };
+    }
+    return response.data.data;
+  },
+
+  savePrediction: async (data: {
+    numbers: number[];
+    strategy?: string;
+    lottoType?: string;
+    targetDrawDate?: string;
+  }): Promise<{ id: string; numbers: number[]; createdAt: string }> => {
+    const response = await api.post<ApiResponse<{ id: string; numbers: number[]; createdAt: string }>>(
+      '/predictions/save',
+      data
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to save prediction');
+    }
+    return response.data.data;
+  },
+
+  checkPrediction: async (predictionId: string, drawId: string): Promise<{
+    matches: number;
+    status: 'win' | 'partial' | 'loss';
+    predictedNumbers: number[];
+    actualWinningNumbers: number[];
+  }> => {
+    const response = await api.post<ApiResponse<{
+      matches: number;
+      status: 'win' | 'partial' | 'loss';
+      predictedNumbers: number[];
+      actualWinningNumbers: number[];
+    }>>(`/predictions/check/${predictionId}`, { drawId });
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to check prediction');
     }
     return response.data.data;
   },

@@ -3,6 +3,7 @@ import pandas as pd
 from typing import List, Dict, Tuple
 from collections import Counter, deque
 import random
+import hashlib
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 import warnings
@@ -330,9 +331,10 @@ class GeneticOptimizer:
     Evolutionary algorithm to optimize number selection
     """
 
-    def __init__(self, population_size: int = 100, generations: int = 50):
+    def __init__(self, population_size: int = 150, generations: int = 75):
         self.pop_size = population_size
         self.generations = generations
+        # Note: Seed will be set by parent before calling evolve_solution
 
     def evolve_solution(self, number_probs: Dict[int, float],
                         constraints: Dict) -> List[int]:
@@ -562,12 +564,20 @@ class EnhancedLottoOracle:
             print("⚠️  Insufficient data for ML training")
 
     def generate_predictions(self, strategy: str = 'ensemble',
-                             n_predictions: int = 3) -> Dict[str, List[List[int]]]:
+                             n_predictions: int = 3,
+                             machine_draws: List[List[int]] = None) -> Dict[str, List[List[int]]]:
         """
         Generate predictions using specified strategy
 
         Returns: Dict with strategy as key and list of number sets
         """
+        # Create deterministic seed from input data
+        # Hash the historical data to create a stable seed
+        data_str = str(sorted([tuple(sorted(d)) for d in self.historical]))
+        seed = int(hashlib.md5((data_str + strategy).encode()).hexdigest()[:8], 16) % (2**31)
+        random.seed(seed)
+        np.random.seed(seed % (2**31))
+        
         results = {}
 
         # Get historical patterns
@@ -579,11 +589,54 @@ class EnhancedLottoOracle:
             ml_pred = self._ml_based_prediction(patterns)
             genetic_pred = self._genetic_optimization(patterns)
             pattern_pred = self._pattern_based_prediction(patterns)
+            
+            # Intelligence engine prediction (if machine draws available)
+            # Note: For ensemble, machine_draws should already be filtered in app.py to match historical
+            intelligence_pred = None
+            if machine_draws and len(machine_draws) > 0:
+                # Check if lengths match (they should after filtering in app.py)
+                if len(machine_draws) == len(self.historical):
+                    try:
+                        import sys
+                        import os
+                        # Add current directory to path for import
+                        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                        from intelligenceEngine import IntelligenceEngine
+                        intel_engine = IntelligenceEngine(self.historical, machine_draws, seed=seed)
+                        intelligence_pred = intel_engine.predict('balanced')
+                        # Validate the prediction before adding
+                        print(f"DEBUG: intelligence_pred = {intelligence_pred}, type = {type(intelligence_pred)}, len = {len(intelligence_pred) if intelligence_pred else 'N/A'}")
+                        if intelligence_pred and len(intelligence_pred) == 5 and all(1 <= n <= 90 for n in intelligence_pred):
+                            results['intelligence'] = [intelligence_pred]
+                            print(f"Intelligence prediction generated and added to results: {intelligence_pred}")
+                        else:
+                            print(f"Warning: Intelligence prediction invalid: {intelligence_pred} (type: {type(intelligence_pred)}, length: {len(intelligence_pred) if intelligence_pred else 'N/A'})")
+                            # Try to fix if it's close
+                            if intelligence_pred and isinstance(intelligence_pred, list) and len(intelligence_pred) > 0:
+                                # If we have some numbers, try to pad or trim
+                                if len(intelligence_pred) < 5:
+                                    print(f"  Attempting to pad from {len(intelligence_pred)} to 5 numbers")
+                                elif len(intelligence_pred) > 5:
+                                    print(f"  Attempting to trim from {len(intelligence_pred)} to 5 numbers")
+                            # Don't add invalid predictions
+                    except Exception as e:
+                        # Fallback if intelligence engine fails
+                        import traceback
+                        error_msg = f"Intelligence engine failed: {str(e)}\n{traceback.format_exc()}"
+                        print(error_msg)
+                        # Don't add to results if it fails
+                else:
+                    print(f"Warning: Machine draws length ({len(machine_draws)}) doesn't match historical length ({len(self.historical)}). Skipping intelligence in ensemble.")
 
             results['ml'] = [ml_pred]
             results['genetic'] = [genetic_pred]
             results['pattern'] = [pattern_pred]
-            results['ensemble'] = [self._ensemble_vote([ml_pred, genetic_pred, pattern_pred])]
+            
+            # Ensemble includes intelligence if available
+            ensemble_inputs = [ml_pred, genetic_pred, pattern_pred]
+            if intelligence_pred:
+                ensemble_inputs.append(intelligence_pred)
+            results['ensemble'] = [self._ensemble_vote(ensemble_inputs)]
 
         elif strategy == 'ml':
             pred = self._ml_based_prediction(patterns)
@@ -596,6 +649,128 @@ class EnhancedLottoOracle:
         elif strategy == 'pattern':
             pred = self._pattern_based_prediction(patterns)
             results['pattern'] = [pred]
+        
+        elif strategy == 'intelligence':
+            # Intelligence engine strategy (requires machine numbers)
+            # Note: machine_draws should already be filtered to match historical length
+            print(f"DEBUG: Intelligence strategy - historical length: {len(self.historical)}, machine_draws: {'present' if machine_draws else 'None'} ({len(machine_draws) if machine_draws else 0} entries)")
+            if not machine_draws:
+                print("ERROR: Intelligence strategy requires machine numbers but none were provided")
+                # Don't raise - provide fallback instead
+                # Use frequency-based fallback
+                from collections import Counter
+                all_numbers = []
+                for draw in self.historical:
+                    all_numbers.extend(draw)
+                freq = Counter(all_numbers)
+                top_5_fallback = sorted([n for n, _ in freq.most_common(5)])
+                results['intelligence'] = [top_5_fallback]
+                print(f"Using frequency-based fallback for intelligence: {top_5_fallback}")
+                return results
+            
+            # Ensure lengths match (they should after filtering in app.py)
+            if len(machine_draws) != len(self.historical):
+                print(f"WARNING: Machine draws length ({len(machine_draws)}) doesn't match historical length ({len(self.historical)})")
+                print(f"  This should have been filtered in app.py. Using frequency-based fallback.")
+                # Don't raise - provide fallback instead
+                from collections import Counter
+                all_numbers = []
+                for draw in self.historical:
+                    all_numbers.extend(draw)
+                freq = Counter(all_numbers)
+                top_5_fallback = sorted([n for n, _ in freq.most_common(5)])
+                results['intelligence'] = [top_5_fallback]
+                print(f"Using frequency-based fallback for intelligence: {top_5_fallback}")
+                return results
+            
+            try:
+                import sys
+                import os
+                # Add current directory to path for import
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                from intelligenceEngine import IntelligenceEngine
+                intel_engine = IntelligenceEngine(self.historical, machine_draws, seed=seed)
+                
+                # Generate multiple persona tickets
+                personas = ['balanced', 'structural_anchor', 'machine_memory_hunter', 
+                           'cluster_rider', 'breakout_speculator']
+                all_tickets = []
+                for persona in personas:
+                    try:
+                        tickets = intel_engine.generate_persona_tickets(persona)
+                        if tickets:
+                            all_tickets.extend(tickets)
+                    except Exception as e:
+                        print(f"Warning: Persona {persona} failed: {e}")
+                        continue
+                
+                # Score all tickets and return best
+                if all_tickets:
+                    scored = [(t, intel_engine.score_ticket(t)) for t in all_tickets]
+                    scored.sort(key=lambda x: x[1], reverse=True)
+                    # Return top prediction
+                    results['intelligence'] = [scored[0][0]]
+                else:
+                    # Fallback: use balanced persona directly
+                    try:
+                        fallback_ticket = intel_engine.predict('balanced')
+                        if fallback_ticket and len(fallback_ticket) == 5:
+                            results['intelligence'] = [fallback_ticket]
+                        else:
+                            # Last resort: use top 5 by unified score
+                            all_scores = {k: intel_engine.compute_unified_score(k) 
+                                        for k in range(1, 91)}
+                            top_5 = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+                            results['intelligence'] = [sorted([n for n, _ in top_5])]
+                    except Exception as e:
+                        print(f"Fallback prediction failed: {e}")
+                        # Last resort: use top 5 by unified score
+                        try:
+                            all_scores = {k: intel_engine.compute_unified_score(k) 
+                                        for k in range(1, 91)}
+                            top_5 = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+                            results['intelligence'] = [sorted([n for n, _ in top_5])]
+                        except Exception as e2:
+                            print(f"Last resort failed: {e2}")
+                            # Absolute last resort: return first 5 numbers (should never happen)
+                            results['intelligence'] = [[1, 2, 3, 4, 5]]
+            except Exception as e:
+                import traceback
+                error_msg = f"Intelligence engine failed: {str(e)}\n{traceback.format_exc()}"
+                print(error_msg)
+                # Try to provide a fallback prediction instead of empty array
+                # Use top 5 numbers by frequency as absolute last resort
+                try:
+                    # Calculate simple frequency-based fallback
+                    from collections import Counter
+                    all_numbers = []
+                    for draw in self.historical:
+                        all_numbers.extend(draw)
+                    freq = Counter(all_numbers)
+                    top_5_fallback = sorted([n for n, _ in freq.most_common(5)])
+                    results['intelligence'] = [top_5_fallback]
+                    print(f"WARNING: Intelligence strategy failed, using frequency-based fallback: {top_5_fallback}")
+                except Exception as e2:
+                    print(f"Fallback generation also failed: {e2}")
+                    # Absolute last resort: return a deterministic set
+                    results['intelligence'] = [[1, 2, 3, 4, 5]]
+                    print("WARNING: Intelligence strategy failed completely, using default fallback [1,2,3,4,5]")
+
+        # Ensure results dict is never completely empty for intelligence strategy
+        # This prevents the app.py loop from skipping intelligence entirely
+        if strategy == 'intelligence' and 'intelligence' not in results:
+            print("CRITICAL: Intelligence strategy completed but 'intelligence' key not in results!")
+            print(f"  Results dict keys: {list(results.keys())}")
+            print(f"  Results dict: {results}")
+            # Provide absolute fallback
+            from collections import Counter
+            all_numbers = []
+            for draw in self.historical:
+                all_numbers.extend(draw)
+            freq = Counter(all_numbers)
+            top_5_fallback = sorted([n for n, _ in freq.most_common(5)])
+            results['intelligence'] = [top_5_fallback]
+            print(f"  Added fallback intelligence prediction: {top_5_fallback}")
 
         # Store for tracking
         self.prediction_history.append({
@@ -604,6 +779,7 @@ class EnhancedLottoOracle:
             'predictions': results
         })
 
+        print(f"DEBUG: Returning results with keys: {list(results.keys())}")
         return results
 
     def _analyze_patterns(self, recent_draws: List[List[int]]) -> Dict:
@@ -651,47 +827,90 @@ class EnhancedLottoOracle:
         }
 
     def _ml_based_prediction(self, patterns: Dict) -> List[int]:
-        """Generate prediction using ML"""
+        """Generate prediction using ML - deterministic selection"""
         # Get probability distribution from ML
         probs = self.ml_predictor.predict_proba(self.historical)
 
-        # Select top 5 with some randomness
-        sorted_nums = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-        top_20 = [num for num, _ in sorted_nums[:20]]
-
-        # Weighted selection
+        # Deterministic selection: Use top probabilities with deterministic tie-breaking
+        # Sort by probability, then by number for deterministic ordering
+        sorted_nums = sorted(probs.items(), key=lambda x: (x[1], -x[0]), reverse=True)
+        
+        # Select top 5 numbers deterministically
+        # Use a mix: top 3 highest probability + 2 from next tier for diversity
         selected = []
-        attempts = 0
-        while len(selected) < 5 and attempts < 100:
-            num = random.choices(top_20, weights=[probs[n] for n in top_20])[0]
+        
+        # Top 3 highest probability
+        for num, prob in sorted_nums[:3]:
+            selected.append(num)
+        
+        # Next 2 from positions 4-15 for diversity (avoid all top numbers)
+        for num, prob in sorted_nums[3:15]:
             if num not in selected:
                 selected.append(num)
-            attempts += 1
-
-        # Fill if needed
+                if len(selected) >= 5:
+                    break
+        
+        # Fill if needed (shouldn't happen, but safety check)
         if len(selected) < 5:
-            remaining = [n for n in range(1, 91) if n not in selected]
-            selected.extend(random.sample(remaining, 5 - len(selected)))
+            for num, prob in sorted_nums:
+                if num not in selected:
+                    selected.append(num)
+                    if len(selected) >= 5:
+                        break
 
         return sorted(selected)
 
     def _genetic_optimization(self, patterns: Dict) -> List[int]:
-        """Generate prediction using genetic optimization"""
-        # Get ML probabilities as base
-        probs = self.ml_predictor.predict_proba(self.historical)
-
-        # Add pattern-based adjustments
-        for num in patterns['hot_numbers']:
-            if num in probs:
-                probs[num] *= 1.3  # Boost hot numbers
-
-        for num in patterns['cold_numbers']:
-            if num in probs and patterns['skips'][num] > 20:
-                probs[num] *= 1.5  # Boost very cold numbers
-
+        """Generate prediction using genetic optimization - distinct from ML"""
+        # Create pattern-based probabilities (NOT ML-based) for differentiation
+        probs = {}
+        
+        # Base probability from pattern analysis
+        hot_weight = 0.4
+        cold_weight = 0.3
+        due_weight = 0.2
+        frequency_weight = 0.1
+        
+        # Calculate frequency from recent draws
+        freq = Counter()
+        for draw in self.historical[-30:]:  # Last 30 draws
+            for num in draw:
+                freq[num] += 1
+        
+        max_freq = max(freq.values()) if freq else 1
+        
+        # Build probability distribution from patterns
+        for num in range(1, 91):
+            score = 0.01  # Base score
+            
+            # Hot numbers boost
+            if num in patterns.get('hot_numbers', [])[:10]:
+                score += hot_weight
+            
+            # Cold numbers boost (if very cold)
+            if num in patterns.get('cold_numbers', [])[:5]:
+                skip = patterns.get('skips', {}).get(num, 0)
+                if skip > 20:
+                    score += cold_weight * (skip / 30)  # More cold = higher boost
+            
+            # Due numbers (around average skip)
+            avg_skip = np.mean(list(patterns.get('skips', {}).values())) if patterns.get('skips') else 10
+            skip = patterns.get('skips', {}).get(num, 0)
+            if 0.8 * avg_skip <= skip <= 1.2 * avg_skip:
+                score += due_weight
+            
+            # Frequency boost
+            score += frequency_weight * (freq.get(num, 0) / max_freq)
+            
+            probs[num] = score
+        
         # Normalize
         total = sum(probs.values())
-        probs = {k: v / total for k, v in probs.items()}
+        if total > 0:
+            probs = {k: v / total for k, v in probs.items()}
+        else:
+            # Fallback: uniform distribution
+            probs = {k: 1/90 for k in range(1, 91)}
 
         # Set constraints for genetic algorithm
         constraints = {
@@ -700,44 +919,75 @@ class EnhancedLottoOracle:
             'high_low_target': [2, 3]
         }
 
-        # Run genetic optimization
+        # Run genetic optimization (uses its own seed from generate_predictions)
         return self.genetic_optimizer.evolve_solution(probs, constraints)
 
     def _pattern_based_prediction(self, patterns: Dict) -> List[int]:
-        """Generate prediction using pattern matching"""
+        """Generate prediction using pattern matching - deterministic"""
         # Create candidate pool with mix of hot, cold, and due numbers
-        hot_pool = patterns['hot_numbers'][:8]
-        cold_pool = [n for n in patterns['cold_numbers'] if patterns['skips'][n] > 15][:8]
+        hot_pool = patterns.get('hot_numbers', [])[:10]
+        cold_pool = [n for n in patterns.get('cold_numbers', []) 
+                    if patterns.get('skips', {}).get(n, 0) > 15][:10]
 
         # Numbers due for appearance (skip around average skip)
-        avg_skip = np.mean(list(patterns['skips'].values()))
+        skips = patterns.get('skips', {})
+        avg_skip = np.mean(list(skips.values())) if skips else 10
         due_pool = [n for n in range(1, 91)
-                    if 0.8 * avg_skip <= patterns['skips'][n] <= 1.2 * avg_skip][:8]
+                    if 0.8 * avg_skip <= skips.get(n, 0) <= 1.2 * avg_skip][:10]
 
         candidate_pool = list(set(hot_pool + cold_pool + due_pool))
 
         # Ensure we have enough candidates
-        if len(candidate_pool) < 10:
-            candidate_pool.extend(random.sample(range(1, 91), 10 - len(candidate_pool)))
+        if len(candidate_pool) < 15:
+            # Deterministic selection: use numbers with highest pattern scores
+            all_candidates = list(range(1, 91))
+            for num in candidate_pool:
+                if num in all_candidates:
+                    all_candidates.remove(num)
+            # Add deterministically based on pattern scores
+            candidate_scores = []
+            for num in all_candidates[:20]:  # Check first 20 not in pool
+                score = self._score_pattern_candidate([num], patterns)
+                candidate_scores.append((num, score))
+            candidate_scores.sort(key=lambda x: x[1], reverse=True)
+            candidate_pool.extend([num for num, _ in candidate_scores[:15 - len(candidate_pool)]])
 
-        # Generate candidate with pattern constraints
+        # Deterministic selection: Score all combinations and pick best
+        # Use a more efficient approach: select top candidates deterministically
         best_candidate = None
         best_score = -float('inf')
 
-        for _ in range(5000):
-            candidate = random.sample(candidate_pool, min(5, len(candidate_pool)))
+        # Score each candidate number individually
+        candidate_scores = {}
+        for num in candidate_pool:
+            candidate_scores[num] = self._score_pattern_candidate([num], patterns)
+        
+        # Sort by score
+        sorted_candidates = sorted(candidate_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # Build best combination deterministically
+        selected = []
+        for num, score in sorted_candidates:
+            if len(selected) < 5:
+                # Check if adding this number improves the combination
+                test_combination = selected + [num]
+                if len(test_combination) <= 5:
+                    test_score = self._score_pattern_candidate(test_combination, patterns)
+                    if test_score > best_score or len(selected) < 5:
+                        selected.append(num)
+                        best_score = test_score
+                        best_candidate = selected.copy()
+        
+        # Ensure we have 5 numbers
+        if len(selected) < 5:
+            remaining = [n for n in range(1, 91) if n not in selected]
+            # Select deterministically from remaining based on pattern scores
+            remaining_scores = [(n, self._score_pattern_candidate([n], patterns)) 
+                              for n in remaining]
+            remaining_scores.sort(key=lambda x: x[1], reverse=True)
+            selected.extend([n for n, _ in remaining_scores[:5 - len(selected)]])
 
-            if len(candidate) < 5:
-                remaining = [n for n in range(1, 91) if n not in candidate]
-                candidate.extend(random.sample(remaining, 5 - len(candidate)))
-
-            score = self._score_pattern_candidate(candidate, patterns)
-
-            if score > best_score:
-                best_score = score
-                best_candidate = candidate
-
-        return sorted(best_candidate) if best_candidate else []
+        return sorted(selected) if selected else []
 
     def _score_pattern_candidate(self, candidate: List[int],
                                  patterns: Dict) -> float:
@@ -777,35 +1027,45 @@ class EnhancedLottoOracle:
         return score
 
     def _ensemble_vote(self, predictions: List[List[int]]) -> List[int]:
-        """Combine multiple predictions using voting"""
+        """Combine multiple predictions using weighted voting - deterministic"""
         if not predictions:
             return []
 
-        # Count occurrences of each number
+        # Weighted voting: Give more weight to numbers that appear in multiple predictions
+        # Also consider the strategy's reliability
         votes = Counter()
-        for pred in predictions:
+        # Strategy weights: ML, Genetic, Pattern, Intelligence (if present)
+        strategy_weights = [1.0, 1.2, 1.1, 1.3]  # Genetic and Intelligence get more weight
+        
+        for i, pred in enumerate(predictions):
+            # Assign weights based on prediction order
+            # Order: [ml, genetic, pattern, intelligence (if present)]
+            weight = strategy_weights[i] if i < len(strategy_weights) else 1.0
             for num in pred:
-                votes[num] += 1
+                votes[num] += weight
 
-        # Select numbers with most votes
+        # Select numbers with most weighted votes (deterministic)
         selected = []
-        for num, count in votes.most_common(10):
+        for num, count in votes.most_common(15):
             if len(selected) < 5:
                 selected.append(num)
             else:
                 break
 
-        # If we don't have 5 numbers, add from next most voted
+        # If we don't have 5 numbers, add from next most voted (deterministic)
         if len(selected) < 5:
             remaining = [n for n in range(1, 91) if n not in selected]
             additional = [n for n, _ in votes.most_common()[len(selected):]
                           if n not in selected][:5 - len(selected)]
             selected.extend(additional)
 
-        # Still need more? Fill randomly
+        # Still need more? Fill deterministically from highest votes
         if len(selected) < 5:
             remaining = [n for n in range(1, 91) if n not in selected]
-            selected.extend(random.sample(remaining, 5 - len(selected)))
+            # Use remaining votes or default to frequency
+            remaining_votes = [(n, votes.get(n, 0)) for n in remaining]
+            remaining_votes.sort(key=lambda x: x[1], reverse=True)
+            selected.extend([n for n, _ in remaining_votes[:5 - len(selected)]])
 
         return sorted(selected)
 

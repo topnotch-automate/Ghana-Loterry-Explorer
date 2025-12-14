@@ -32,6 +32,11 @@ const strategyInfo: Record<PredictionStrategy, { icon: string; description: stri
     description: 'Pattern matching analysis identifying hot numbers, cold numbers, and trends',
     color: 'from-orange-500 to-red-500',
   },
+  intelligence: {
+    icon: '🧠',
+    description: 'Advanced intelligence engine using machine numbers, temporal memory, lag signatures, and relationship analysis',
+    color: 'from-indigo-500 to-purple-500',
+  },
 };
 
 export const Predictions: React.FC = () => {
@@ -47,6 +52,8 @@ export const Predictions: React.FC = () => {
   const [selectedLottoType, setSelectedLottoType] = useState<string>('');
   const [useTypeSpecificTable, setUseTypeSpecificTable] = useState<boolean>(true);
   const [loadingTypes, setLoadingTypes] = useState(false);
+  const [savingPrediction, setSavingPrediction] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -92,6 +99,7 @@ export const Predictions: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      setSaveSuccess(false);
       const result = await predictionsApi.generate({
         strategy,
         lottoType: selectedLottoType || undefined,
@@ -102,6 +110,37 @@ export const Predictions: React.FC = () => {
       setError(handleApiError(err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSavePrediction = async () => {
+    if (!predictions) return;
+
+    // Get the primary prediction (ensemble or first available)
+    const primaryPrediction = predictions.predictions.ensemble?.[0] 
+      || predictions.predictions[strategy]?.[0]
+      || Object.values(predictions.predictions).flat()[0];
+
+    if (!primaryPrediction?.numbers) {
+      setError('No prediction to save');
+      return;
+    }
+
+    try {
+      setSavingPrediction(true);
+      setError(null);
+      await predictionsApi.savePrediction({
+        numbers: primaryPrediction.numbers,
+        strategy,
+        lottoType: selectedLottoType || undefined,
+        targetDrawDate: new Date().toISOString().split('T')[0],
+      });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setSavingPrediction(false);
     }
   };
 
@@ -276,8 +315,8 @@ export const Predictions: React.FC = () => {
           </svg>
           <h2 className="text-xl font-semibold text-gray-800">Prediction Strategy</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {(['ensemble', 'ml', 'genetic', 'pattern'] as PredictionStrategy[]).map((strat) => {
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {(['ensemble', 'ml', 'genetic', 'pattern', 'intelligence'] as PredictionStrategy[]).map((strat) => {
             const info = strategyInfo[strat];
             const isSelected = strategy === strat;
             return (
@@ -359,20 +398,49 @@ export const Predictions: React.FC = () => {
         <div className="space-y-6 animate-fade-in">
           {/* Success Header */}
           <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-green-800">Predictions Generated Successfully!</h3>
+                  <p className="text-sm text-green-700">
+                    Based on {predictions.data_points_used} historical draws • {strategy.charAt(0).toUpperCase() + strategy.slice(1)} strategy
+                    {selectedLottoType && ` • ${selectedLottoType}`}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-semibold text-green-800">Predictions Generated Successfully!</h3>
-                <p className="text-sm text-green-700">
-                  Based on {predictions.data_points_used} historical draws • {strategy.charAt(0).toUpperCase() + strategy.slice(1)} strategy
-                  {selectedLottoType && ` • ${selectedLottoType}`}
-                </p>
-              </div>
+              <button
+                onClick={handleSavePrediction}
+                disabled={savingPrediction}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {savingPrediction ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    Save Prediction
+                  </>
+                )}
+              </button>
             </div>
+            {saveSuccess && (
+              <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800">
+                ✓ Prediction saved successfully! View it on your dashboard.
+              </div>
+            )}
           </div>
 
           {/* Regime Change Alert */}
@@ -446,6 +514,15 @@ export const Predictions: React.FC = () => {
                     title="Pattern Prediction"
                     prediction={predictions.predictions.pattern[0]}
                     strategy="pattern"
+                  />
+                </div>
+              )}
+              {predictions.predictions.intelligence && predictions.predictions.intelligence.length > 0 && (
+                <div className="animate-slide-up" style={{ animationDelay: '400ms' }}>
+                  <PredictionCard
+                    title="Intelligence Prediction"
+                    prediction={predictions.predictions.intelligence[0]}
+                    strategy="intelligence"
                   />
                 </div>
               )}
