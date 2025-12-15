@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData, PredictionResponse, SubscriptionStatus, PredictionStrategy, SavedPrediction } from '../types';
+import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData, PredictionResponse, SubscriptionStatus, PredictionStrategy, SavedPrediction, StrategyPerformance } from '../types';
 import { API_CONFIG } from '../utils/constants';
 import { ApiError, handleApiError } from '../utils/errors';
 
@@ -433,6 +433,14 @@ export const predictionsApi = {
     }>>(`/predictions/check/${predictionId}`, { drawId });
     if (!response.data.success || !response.data.data) {
       throw new ApiError(response.data.error || 'Failed to check prediction');
+    }
+    return response.data.data;
+  },
+
+  getStrategyPerformance: async (): Promise<StrategyPerformance> => {
+    const response = await api.get<ApiResponse<StrategyPerformance>>('/predictions/strategy-performance');
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to fetch strategy performance');
     }
     return response.data.data;
   },

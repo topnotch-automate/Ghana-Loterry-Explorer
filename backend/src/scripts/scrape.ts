@@ -38,29 +38,61 @@ async function scrapeAndPopulate(options: ScrapeOptions = {}): Promise<void> {
     logger.info('🔄 Reset scraper state - starting from page 1');
   }
 
-  // Determine start page
-  let actualStartPage: number;
-  if (startPage !== undefined) {
-    actualStartPage = startPage;
-    logger.info(`📄 Using provided start page: ${actualStartPage}`);
-  } else {
-    actualStartPage = await getNextPage();
-    logger.info(`📄 Continuing from last page: ${actualStartPage}`);
-  }
-
+  // Always scrape page 1 first (most recent draws), then continue from last page
+  const state = await loadScraperState();
+  const lastScrapedPage = state.lastPage;
+  
   logger.info('🔍 Starting scraper...');
-  logger.info(`Start page: ${actualStartPage}`);
-  if (maxPages) {
-    logger.info(`Max pages: ${maxPages}`);
-  } else {
-    logger.info('Max pages: unlimited');
-  }
-
+  logger.info(`📄 Strategy: Always scrape page 1 (most recent), then continue from page ${lastScrapedPage + 1}`);
+  
+  let allDraws: any[] = [];
+  let highestPageScraped = 0;
+  
   try {
-    // Scrape data
-    const { draws, lastPage } = await scraperService.scrapeB2B(actualStartPage, maxPages);
+    // Step 1: Always scrape page 1 first (most recent draws)
+    logger.info('\n📄 Step 1: Scraping page 1 (most recent draws)...');
+    const page1Result = await scraperService.scrapeB2B(1, 1); // Scrape only page 1
+    allDraws.push(...page1Result.draws);
+    highestPageScraped = Math.max(highestPageScraped, page1Result.lastPage);
+    logger.info(`✅ Page 1: Found ${page1Result.draws.length} draw(s)`);
+    
+    // Step 2: Continue from last scraped page (if > 1)
+    if (startPage !== undefined) {
+      // If user specified start page, use it (but we already did page 1)
+      if (startPage > 1) {
+        logger.info(`\n📄 Step 2: Scraping from user-specified page ${startPage}...`);
+        const continueResult = await scraperService.scrapeB2B(startPage, maxPages);
+        allDraws.push(...continueResult.draws);
+        highestPageScraped = Math.max(highestPageScraped, continueResult.lastPage);
+        logger.info(`✅ Pages ${startPage}+: Found ${continueResult.draws.length} draw(s)`);
+      }
+    } else if (lastScrapedPage > 0) {
+      // Continue from last scraped page + 1
+      const continueFromPage = lastScrapedPage + 1;
+      if (continueFromPage > 1) {
+        logger.info(`\n📄 Step 2: Continuing from last scraped page (${lastScrapedPage}) → starting at page ${continueFromPage}...`);
+        const continueResult = await scraperService.scrapeB2B(continueFromPage, maxPages);
+        allDraws.push(...continueResult.draws);
+        highestPageScraped = Math.max(highestPageScraped, continueResult.lastPage);
+        logger.info(`✅ Pages ${continueFromPage}+: Found ${continueResult.draws.length} draw(s)`);
+      }
+    } else {
+      // First time scraping - only page 1 was done above
+      logger.info('\n📄 Step 2: First scrape - only page 1 processed');
+    }
+    
+    // Remove duplicates based on draw date and lotto type
+    const uniqueDraws = new Map<string, any>();
+    for (const draw of allDraws) {
+      const key = `${draw.drawDate}_${draw.lottoType}`;
+      if (!uniqueDraws.has(key)) {
+        uniqueDraws.set(key, draw);
+      }
+    }
+    const draws = Array.from(uniqueDraws.values());
+    const lastPage = highestPageScraped;
 
-    logger.info(`\n✅ Scraping completed. Found ${draws.length} draw(s)\n`);
+    logger.info(`\n✅ Scraping completed. Found ${draws.length} unique draw(s) (${allDraws.length} total before deduplication)\n`);
     
     if (draws.length === 0) {
       logger.warn('⚠️  No draws found. This could mean:');
@@ -76,7 +108,7 @@ async function scrapeAndPopulate(options: ScrapeOptions = {}): Promise<void> {
     logger.info(`💾 Saved ${draws.length} draws to file`);
 
     // Convert to CreateDrawInput format
-    const allDraws = draws.map((draw) => {
+    const allDrawsForDB = draws.map((draw) => {
       try {
         return scraperService.toCreateDrawInput(draw);
       } catch (error) {
@@ -85,12 +117,12 @@ async function scrapeAndPopulate(options: ScrapeOptions = {}): Promise<void> {
       }
     }).filter((draw): draw is NonNullable<typeof draw> => draw !== null);
 
-    if (allDraws.length === 0) {
+    if (allDrawsForDB.length === 0) {
       logger.warn('⚠️  No valid draws to insert after conversion. Exiting.');
       return;
     }
 
-    logger.info(`📋 Converted ${allDraws.length} draw(s) to database format`);
+    logger.info(`📋 Converted ${allDrawsForDB.length} draw(s) to database format`);
 
     // Verify database connection
     logger.info('🔌 Verifying database connection...');
@@ -108,10 +140,10 @@ async function scrapeAndPopulate(options: ScrapeOptions = {}): Promise<void> {
     let totalErrors = 0;
     const lastPageProcessed = lastPage;
 
-    logger.info(`📦 Processing ${allDraws.length} draw(s) in batches of ${batchSize}...`);
+    logger.info(`📦 Processing ${allDrawsForDB.length} draw(s) in batches of ${batchSize}...`);
 
-    for (let i = 0; i < allDraws.length; i += batchSize) {
-      const batch = allDraws.slice(i, i + batchSize);
+    for (let i = 0; i < allDrawsForDB.length; i += batchSize) {
+      const batch = allDrawsForDB.slice(i, i + batchSize);
       const batchNum = Math.floor(i / batchSize) + 1;
       const totalBatches = Math.ceil(allDraws.length / batchSize);
 

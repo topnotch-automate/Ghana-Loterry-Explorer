@@ -61,10 +61,12 @@ export async function saveScraperState(state: Partial<ScraperState>): Promise<vo
 
 /**
  * Get the next page to scrape (last page + 1)
+ * Note: Page 1 is always scraped separately, so this returns the continuation page
  */
 export async function getNextPage(): Promise<number> {
   const state = await loadScraperState();
-  return state.lastPage + 1;
+  // Return max(2, lastPage + 1) since page 1 is always scraped separately
+  return Math.max(2, state.lastPage + 1);
 }
 
 /**

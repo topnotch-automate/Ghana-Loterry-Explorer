@@ -95,3 +95,43 @@ export interface SubscriptionStatus {
 
 export type PredictionStrategy = 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence';
 
+export interface SavedPrediction {
+  id: string;
+  strategy: string;
+  predictionData?: any;
+  lottoType?: string;
+  predictedNumbers: number[];
+  targetDrawDate?: string;
+  matches: number;
+  isChecked: boolean;
+  checkedAt?: string;
+  createdAt: string;
+  actualDraw?: {
+    id: string;
+    drawDate: string;
+    winningNumbers: number[];
+  };
+  status: 'win' | 'partial' | 'loss' | 'pending';
+}
+
+export interface StrategyPeriodPerformance {
+  bestStrategy: string | null;
+  totalMatches: number;
+  totalPredictions: number;
+  averageMatches: number;
+  daysWithMatches: number;
+  dailyMatches: Record<string, number>; // date (YYYY-MM-DD) -> total matches on that day
+  strategyBreakdown: Record<string, {
+    totalMatches: number;
+    totalPredictions: number;
+    averageMatches: number;
+    dailyMatches: Record<string, number>; // date -> matches for this strategy
+  }>;
+}
+
+export interface StrategyPerformance {
+  week: StrategyPeriodPerformance;
+  month: StrategyPeriodPerformance;
+  year: StrategyPeriodPerformance;
+}
+

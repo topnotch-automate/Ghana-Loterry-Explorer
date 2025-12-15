@@ -1,148 +1,145 @@
-# Deployment Checklist
+# 🚀 Deployment Checklist
 
-Quick reference checklist for deploying Ghana Lottery Explorer to production.
+Use this checklist to ensure a smooth deployment to Render.
 
 ## Pre-Deployment
 
-- [ ] Server provisioned (VPS/Cloud instance)
-- [ ] Domain name registered and DNS configured
-- [ ] SSH access to server configured
-- [ ] Server has minimum requirements (2 CPU, 4GB RAM, 20GB storage)
+- [ ] Code is committed and pushed to GitHub
+- [ ] All tests pass locally
+- [ ] Environment variables documented
+- [ ] Database migrations ready
+- [ ] Build commands verified locally
 
-## Server Setup
+## Step 1: PostgreSQL Database
 
-- [ ] System updated (`apt update && apt upgrade`)
-- [ ] Node.js 18+ installed
-- [ ] PostgreSQL 12+ installed and running
-- [ ] Python 3.9+ installed
-- [ ] Nginx installed
-- [ ] PM2 installed globally
-- [ ] Firewall (UFW) configured
+- [ ] Created PostgreSQL database on Render
+- [ ] Saved Internal Database URL
+- [ ] Database is running and accessible
 
-## Application Setup
+## Step 2: Backend Service
 
-- [ ] Repository cloned to `/var/www/ghana-lottery-explorer`
-- [ ] All dependencies installed (`npm run install:all`)
-- [ ] Python virtual environment created and dependencies installed
-- [ ] Backend `.env` file configured with:
-  - [ ] `DATABASE_URL`
-  - [ ] `NODE_ENV=production`
+- [ ] Created Web Service for backend
+- [ ] Set root directory to `backend`
+- [ ] Set build command: `npm install && npm run build`
+- [ ] Set start command: `npm start`
+- [ ] Added all environment variables:
+  - [ ] `DATABASE_URL` (Internal Database URL)
   - [ ] `PORT=5000`
-  - [ ] `PYTHON_SERVICE_URL=http://localhost:5001`
-  - [ ] `CORS_ORIGIN` (your domain)
-  - [ ] `JWT_SECRET` (strong random string)
-- [ ] Frontend `.env` file configured with:
-  - [ ] `VITE_API_URL` (your API URL)
+  - [ ] `NODE_ENV=production`
+  - [ ] `CORS_ORIGIN` (will update after frontend)
+  - [ ] `JWT_SECRET` (strong random secret)
+  - [ ] `JWT_EXPIRES_IN=7d`
+  - [ ] `PYTHON_SERVICE_URL` (will update after Python service)
+- [ ] Service deployed successfully
+- [ ] Health endpoint working: `/health`
+- [ ] Backend URL saved
 
-## Database Setup
+## Step 3: Python Service
 
-- [ ] PostgreSQL database created (`ghana_lottery`)
-- [ ] Database user created with proper permissions
-- [ ] Schema applied (`schema.sql`)
-- [ ] Migrations run (`npm run migrate`)
-- [ ] Database backup script created and scheduled
+- [ ] Created Web Service for Python
+- [ ] Set root directory to `python-service`
+- [ ] Set build command: `pip install -r requirements.txt`
+- [ ] Set start command: `gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2`
+- [ ] Added environment variables:
+  - [ ] `PORT=5001`
+  - [ ] `FLASK_ENV=production`
+  - [ ] `GUNICORN_TIMEOUT=120`
+- [ ] Service deployed successfully
+- [ ] Health endpoint working: `/health`
+- [ ] Python service URL saved
+- [ ] Updated backend `PYTHON_SERVICE_URL` environment variable
 
-## Build & Deploy
+## Step 4: Frontend Service
 
-- [ ] Frontend built (`npm run build:frontend`)
-- [ ] Backend built (`npm run build:backend`)
-- [ ] Build artifacts verified in `dist` folders
+- [ ] Created Static Site for frontend
+- [ ] Set root directory to `frontend`
+- [ ] Set build command: `npm install && npm run build`
+- [ ] Set publish directory: `dist`
+- [ ] Added environment variables:
+  - [ ] `VITE_API_URL` (backend URL)
+- [ ] Service deployed successfully
+- [ ] Frontend URL saved
+- [ ] Updated backend `CORS_ORIGIN` environment variable
 
-## Services Configuration
+## Step 5: Database Setup
 
-- [ ] Backend started with PM2 (`lottery-backend`)
-- [ ] Python service started with PM2 (`lottery-python`)
-- [ ] PM2 startup script configured
-- [ ] PM2 configuration saved (`pm2 save`)
+- [ ] Connected to database (via Render Shell or external tool)
+- [ ] Ran migration: `001_update_cooccurrence_to_triplets.sql`
+- [ ] Ran migration: `002_add_users_and_subscriptions.sql`
+- [ ] Ran migration: `003_create_lotto_type_tables.sql`
+- [ ] Ran migration: `004_enhance_prediction_history.sql`
+- [ ] Verified tables created successfully
 
-## Nginx Configuration
+## Step 6: Initial Data
 
-- [ ] Nginx configuration file created
-- [ ] Frontend static files served correctly
-- [ ] Backend API proxied to `localhost:5000`
-- [ ] Health check endpoint configured
-- [ ] Nginx configuration tested (`nginx -t`)
-- [ ] Nginx reloaded/restarted
+- [ ] Connected to backend via Render Shell
+- [ ] Ran: `npm run scrape` (or via admin endpoint)
+- [ ] Ran: `npm run populate` (or via admin endpoint)
+- [ ] Verified data in database
 
-## SSL/HTTPS
+## Step 7: Final Configuration
 
-- [ ] Let's Encrypt Certbot installed
-- [ ] SSL certificate obtained
-- [ ] SSL auto-renewal configured
-- [ ] HTTPS redirect working
-- [ ] SSL grade checked (A or A+)
+- [ ] Updated backend `PYTHON_SERVICE_URL` to Python service URL
+- [ ] Updated backend `CORS_ORIGIN` to frontend URL
+- [ ] Updated frontend `VITE_API_URL` to backend URL
+- [ ] All services restarted with new environment variables
 
-## Security
+## Step 8: Testing
 
-- [ ] Firewall rules configured (ports 22, 80, 443 only)
-- [ ] SSH key-based authentication enabled
-- [ ] Root login disabled (if applicable)
-- [ ] Strong database password set
-- [ ] Environment variables secured (not in git)
-- [ ] CORS properly configured
-- [ ] Security headers added in Nginx
+- [ ] Frontend loads without errors
+- [ ] Can view latest draws
+- [ ] Can search draws
+- [ ] Analytics page works
+- [ ] Can register/login
+- [ ] Can generate predictions (Pro users)
+- [ ] All API endpoints responding
+- [ ] No CORS errors in browser console
+- [ ] No network errors
 
-## Monitoring
+## Step 9: Production Hardening
 
-- [ ] PM2 monitoring setup
-- [ ] Log rotation configured
-- [ ] Database backup automation configured
-- [ ] System monitoring tools installed (htop, etc.)
+- [ ] Strong `JWT_SECRET` set (not default)
+- [ ] Database backups configured
+- [ ] Error logging configured
+- [ ] Monitoring set up (optional)
+- [ ] Custom domain configured (optional)
+- [ ] SSL/HTTPS verified (automatic on Render)
 
-## Testing
+## Troubleshooting
 
-- [ ] Frontend loads correctly
-- [ ] API endpoints accessible
-- [ ] Database queries working
-- [ ] Python prediction service responding
-- [ ] Health checks passing
-- [ ] SSL certificate valid
-- [ ] Mobile responsiveness tested
+If something doesn't work:
 
-## Post-Deployment
+1. **Check Logs**: View service logs in Render dashboard
+2. **Verify Environment Variables**: Ensure all are set correctly
+3. **Test Health Endpoints**: `/health` for backend, `/health` for Python
+4. **Check Database Connection**: Verify `DATABASE_URL` is correct
+5. **Verify Service URLs**: Ensure all URLs use HTTPS
+6. **Check CORS**: Ensure `CORS_ORIGIN` matches frontend URL exactly
 
-- [ ] Domain DNS propagation verified
-- [ ] All services running (`pm2 list`)
-- [ ] Logs checked for errors
-- [ ] Performance tested
-- [ ] Backup verified working
-- [ ] Update script created
-- [ ] Documentation updated
+## Quick Commands
 
-## Quick Commands Reference
-
+### Connect to Backend Shell
 ```bash
-# Check services
-pm2 list
-pm2 logs
-
-# Restart services
-pm2 restart all
-
-# Check Nginx
-systemctl status nginx
-nginx -t
-
-# Check PostgreSQL
-systemctl status postgresql
-
-# View logs
-pm2 logs lottery-backend
-pm2 logs lottery-python
-tail -f /var/log/nginx/error.log
-
-# Database backup
-pg_dump -U lottery_user ghana_lottery > backup.sql
-
-# Update application
-cd /var/www/ghana-lottery-explorer
-git pull
-npm run install:all
-npm run build
-pm2 restart all
+# Via Render Dashboard → Backend Service → Shell
+cd backend
+npm run check-db  # Check database connection
+npm run migrate    # Run migrations
+npm run scrape     # Scrape data
+npm run populate   # Populate database
 ```
+
+### Connect to Database
+```bash
+# Via Render Dashboard → Database → Connect
+# Or use external tool with External Database URL
+```
+
+## Support Resources
+
+- Render Docs: https://render.com/docs
+- Render Status: https://status.render.com
+- Your Service Logs: Render Dashboard → Service → Logs
 
 ---
 
-**Note**: For detailed instructions, see [DEPLOYMENT.md](./DEPLOYMENT.md)
-
+**✅ Deployment Complete!**

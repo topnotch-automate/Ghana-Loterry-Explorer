@@ -1,0 +1,69 @@
+# Render Infrastructure as Code
+# This file can be used to define all services in one place
+# Deploy via: render.yaml blueprint or manually create services
+
+services:
+  # Backend API Service
+  - type: web
+    name: ghana-lottery-backend
+    env: node
+    region: oregon  # Change to your preferred region
+    plan: free  # or starter, standard, etc.
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    rootDir: backend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ghana-lottery-db
+          property: connectionString
+      - key: CORS_ORIGIN
+        sync: false  # Set manually after frontend deployment
+      - key: JWT_SECRET
+        generateValue: true  # Generate random secret
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: PYTHON_SERVICE_URL
+        sync: false  # Set manually after Python service deployment
+
+  # Python Prediction Service
+  - type: web
+    name: ghana-lottery-python
+    env: python
+    region: oregon  # Change to your preferred region
+    plan: free  # or starter, standard, etc.
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2
+    rootDir: python-service
+    envVars:
+      - key: PORT
+        value: 5001
+      - key: FLASK_ENV
+        value: production
+      - key: GUNICORN_TIMEOUT
+        value: 120
+
+  # Frontend Static Site
+  - type: web
+    name: ghana-lottery-frontend
+    env: static
+    region: oregon  # Change to your preferred region
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    rootDir: frontend
+    envVars:
+      - key: VITE_API_URL
+        sync: false  # Set manually after backend deployment
+
+databases:
+  # PostgreSQL Database
+  - name: ghana-lottery-db
+    databaseName: ghanalottery
+    user: ghanalottery
+    plan: free  # or starter, standard, etc.
+    region: oregon  # Change to your preferred region
+

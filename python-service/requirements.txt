@@ -4,6 +4,7 @@ scikit-learn
 flask
 flask-cors
 python-dotenv
+gunicorn
 
 # Note: imbalanced-learn is OPTIONAL
 # The code works without it (uses sklearn's resample as fallback)

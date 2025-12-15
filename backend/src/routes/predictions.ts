@@ -473,5 +473,143 @@ router.get('/lotto-types', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/predictions/strategy-performance
+ * Get strategy performance statistics based on actual draw dates (when predictions were checked)
+ * Tracks matches by day, week, month, and year based on when the actual results came in
+ */
+router.get('/strategy-performance', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+
+    // Get all checked predictions with their check dates (when actual draw happened)
+    const result = await pool.query(
+      `SELECT 
+        ph.strategy,
+        ph.matches,
+        ph.checked_at,
+        ph.created_at,
+        d.draw_date
+       FROM prediction_history ph
+       LEFT JOIN draws d ON ph.actual_draw_id = d.id
+       WHERE ph.user_id = $1
+         AND ph.is_checked = TRUE
+         AND ph.checked_at IS NOT NULL
+       ORDER BY ph.checked_at DESC`,
+      [userId]
+    );
+
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+    // Helper function to calculate performance for a time period
+    const calculatePerformance = (startDate: Date) => {
+      const strategyStats: Record<string, {
+        totalMatches: number;
+        totalPredictions: number;
+        dailyMatches: Record<string, number>; // date -> matches
+      }> = {};
+
+      let totalMatches = 0;
+      let totalPredictions = 0;
+      const dailyMatches: Record<string, number> = {}; // Overall daily matches across all strategies
+
+      for (const row of result.rows) {
+        const checkedAt = row.checked_at ? new Date(row.checked_at) : null;
+        if (!checkedAt || checkedAt < startDate) continue;
+
+        const strategy = row.strategy || 'unknown';
+        const matches = parseInt(row.matches, 10) || 0;
+        
+        // Get date string (YYYY-MM-DD) for daily tracking
+        const dateKey = checkedAt.toISOString().split('T')[0];
+
+        // Initialize strategy stats if needed
+        if (!strategyStats[strategy]) {
+          strategyStats[strategy] = {
+            totalMatches: 0,
+            totalPredictions: 0,
+            dailyMatches: {},
+          };
+        }
+
+        // Update strategy stats
+        strategyStats[strategy].totalMatches += matches;
+        strategyStats[strategy].totalPredictions += 1;
+        strategyStats[strategy].dailyMatches[dateKey] = (strategyStats[strategy].dailyMatches[dateKey] || 0) + matches;
+
+        // Update overall stats
+        totalMatches += matches;
+        totalPredictions += 1;
+        dailyMatches[dateKey] = (dailyMatches[dateKey] || 0) + matches;
+      }
+
+      // Find best strategy (most total matches per strategy)
+      let bestStrategy: string | null = null;
+      let maxTotalMatches = 0;
+
+      const strategyBreakdown: Record<string, {
+        totalMatches: number;
+        totalPredictions: number;
+        averageMatches: number;
+        dailyMatches: Record<string, number>;
+      }> = {};
+
+      // Build strategy breakdown and find best
+      for (const [strategy, stats] of Object.entries(strategyStats)) {
+        strategyBreakdown[strategy] = {
+          totalMatches: stats.totalMatches,
+          totalPredictions: stats.totalPredictions,
+          averageMatches: stats.totalPredictions > 0 ? stats.totalMatches / stats.totalPredictions : 0,
+          dailyMatches: stats.dailyMatches,
+        };
+
+        // Best strategy is the one with most total matches
+        if (stats.totalMatches > maxTotalMatches) {
+          maxTotalMatches = stats.totalMatches;
+          bestStrategy = strategy;
+        }
+      }
+
+      // Calculate totals across all strategies
+      let totalMatchesAll = 0;
+      let totalPredictionsAll = 0;
+      for (const stats of Object.values(strategyStats)) {
+        totalMatchesAll += stats.totalMatches;
+        totalPredictionsAll += stats.totalPredictions;
+      }
+
+      return {
+        bestStrategy,
+        totalMatches: totalMatchesAll, // Total matches across all strategies
+        totalPredictions: totalPredictionsAll, // Total predictions across all strategies
+        averageMatches: totalPredictionsAll > 0 ? totalMatchesAll / totalPredictionsAll : 0,
+        strategyBreakdown, // All strategies with their individual stats
+        dailyMatches, // Matches per day in this period (overall)
+        daysWithMatches: Object.keys(dailyMatches).length,
+      };
+    };
+
+    const [week, month, year] = [
+      calculatePerformance(weekAgo),
+      calculatePerformance(monthAgo),
+      calculatePerformance(yearAgo),
+    ];
+
+    res.json({
+      success: true,
+      data: {
+        week,
+        month,
+        year,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;
 

@@ -71,29 +71,61 @@ async function populateDatabase(options: PopulateOptions = {}): Promise<void> {
       logger.info('📥 No saved data found, scraping draws from theb2b.com...');
     }
 
-    // Determine start page
-    let actualStartPage: number;
+    // Always scrape page 1 first (most recent draws), then continue from last page
+    const state = await loadScraperState();
+    const lastScrapedPage = state.lastPage;
+    
+    logger.info('🔍 Starting scraper...');
+    logger.info(`📄 Strategy: Always scrape page 1 (most recent), then continue from page ${lastScrapedPage + 1}`);
+    
+    let allScrapedDrawsList: any[] = [];
+    let highestPageScraped = 0;
+    
+    // Step 1: Always scrape page 1 first (most recent draws)
+    logger.info('\n📄 Step 1: Scraping page 1 (most recent draws)...');
+    const page1Result = await scraperService.scrapeB2B(1, 1); // Scrape only page 1
+    allScrapedDrawsList.push(...page1Result.draws);
+    highestPageScraped = Math.max(highestPageScraped, page1Result.lastPage);
+    logger.info(`✅ Page 1: Found ${page1Result.draws.length} draw(s)`);
+    
+    // Step 2: Continue from last scraped page (if > 1)
     if (startPage !== undefined) {
-      actualStartPage = startPage;
-      logger.info(`📄 Using provided start page: ${actualStartPage}`);
+      // If user specified start page, use it (but we already did page 1)
+      if (startPage > 1) {
+        logger.info(`\n📄 Step 2: Scraping from user-specified page ${startPage}...`);
+        const continueResult = await scraperService.scrapeB2B(startPage, maxPages);
+        allScrapedDrawsList.push(...continueResult.draws);
+        highestPageScraped = Math.max(highestPageScraped, continueResult.lastPage);
+        logger.info(`✅ Pages ${startPage}+: Found ${continueResult.draws.length} draw(s)`);
+      }
+    } else if (lastScrapedPage > 0) {
+      // Continue from last scraped page + 1
+      const continueFromPage = lastScrapedPage + 1;
+      if (continueFromPage > 1) {
+        logger.info(`\n📄 Step 2: Continuing from last scraped page (${lastScrapedPage}) → starting at page ${continueFromPage}...`);
+        const continueResult = await scraperService.scrapeB2B(continueFromPage, maxPages);
+        allScrapedDrawsList.push(...continueResult.draws);
+        highestPageScraped = Math.max(highestPageScraped, continueResult.lastPage);
+        logger.info(`✅ Pages ${continueFromPage}+: Found ${continueResult.draws.length} draw(s)`);
+      }
     } else {
-      actualStartPage = await getNextPage();
-      logger.info(`📄 Continuing from last page: ${actualStartPage}`);
+      // First time scraping - only page 1 was done above
+      logger.info('\n📄 Step 2: First scrape - only page 1 processed');
     }
-
-    logger.info(`Start page: ${actualStartPage}`);
-    if (maxPages) {
-      logger.info(`Max pages: ${maxPages}`);
-    } else {
-      logger.info('Max pages: unlimited (will scrape until no more results)');
+    
+    // Remove duplicates based on draw date and lotto type
+    const uniqueDrawsMap = new Map<string, any>();
+    for (const draw of allScrapedDrawsList) {
+      const key = `${draw.drawDate}_${draw.lottoType}`;
+      if (!uniqueDrawsMap.has(key)) {
+        uniqueDrawsMap.set(key, draw);
+      }
     }
-
-    const scrapeResult = await scraperService.scrapeB2B(actualStartPage, maxPages);
-    allScrapedDraws = scrapeResult.draws;
-    lastPageProcessed = scrapeResult.lastPage;
+    allScrapedDraws = Array.from(uniqueDrawsMap.values());
+    lastPageProcessed = highestPageScraped;
     shouldSaveState = true;
 
-    logger.info(`\n✅ Scraping completed. Found ${allScrapedDraws.length} draw(s)`);
+    logger.info(`\n✅ Scraping completed. Found ${allScrapedDraws.length} unique draw(s) (${allScrapedDrawsList.length} total before deduplication)`);
   }
 
   if (allScrapedDraws.length === 0) {
