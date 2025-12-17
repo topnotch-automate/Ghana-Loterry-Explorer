@@ -745,17 +745,23 @@ class EnhancedLottoOracle:
         score = 0
 
         # Hot numbers bonus
-        hot_bonus = sum(1 for n in candidate if n in patterns['hot_numbers'][:10])
-        score += hot_bonus * 2
+        hot_numbers = patterns.get('hot_numbers', [])
+        if hot_numbers:
+            hot_bonus = sum(1 for n in candidate if n in hot_numbers[:10])
+            score += hot_bonus * 2
 
         # Cold numbers bonus (if very cold)
-        cold_bonus = sum(1 for n in candidate
-                         if n in patterns['cold_numbers'][:5] and patterns['skips'][n] > 20)
-        score += cold_bonus * 3
+        cold_numbers = patterns.get('cold_numbers', [])
+        skips = patterns.get('skips', {})
+        if cold_numbers and skips:
+            cold_bonus = sum(1 for n in candidate
+                             if n in cold_numbers[:5] and skips.get(n, 0) > 20)
+            score += cold_bonus * 3
 
         # Sum constraint
         total = sum(candidate)
-        if patterns['sum_range'][0] <= total <= patterns['sum_range'][1]:
+        sum_range = patterns.get('sum_range', (0, 1000))
+        if sum_range[0] <= total <= sum_range[1]:
             score += 5
 
         # Even/Odd balance
@@ -770,9 +776,11 @@ class EnhancedLottoOracle:
 
         # No consecutive numbers
         sorted_cand = sorted(candidate)
-        consecutive_penalty = sum(1 for i in range(4)
-                                  if sorted_cand[i + 1] - sorted_cand[i] == 1)
-        score -= consecutive_penalty * 2
+        if len(sorted_cand) >= 2:
+            # Use len(sorted_cand) - 1 instead of hardcoded 4 to avoid index errors
+            consecutive_penalty = sum(1 for i in range(len(sorted_cand) - 1)
+                                      if sorted_cand[i + 1] - sorted_cand[i] == 1)
+            score -= consecutive_penalty * 2
 
         return score
 

@@ -35,8 +35,20 @@ class IntelligenceEngine:
             machine_draws: List of machine number sets (each is 5 numbers)
             seed: Optional seed for deterministic behavior
         """
+        if not historical_draws or not machine_draws:
+            raise ValueError("Historical and machine draws cannot be empty")
+        
         if len(historical_draws) != len(machine_draws):
-            raise ValueError("Historical and machine draws must have same length")
+            raise ValueError(f"Historical and machine draws must have same length. Got {len(historical_draws)} historical and {len(machine_draws)} machine draws")
+        
+        # Validate that all draws have valid length
+        for i, draw in enumerate(historical_draws):
+            if not draw or len(draw) != 5:
+                raise ValueError(f"Historical draw {i} has invalid length: {len(draw) if draw else 0} (expected 5)")
+        
+        for i, draw in enumerate(machine_draws):
+            if not draw or len(draw) != 5:
+                raise ValueError(f"Machine draw {i} has invalid length: {len(draw) if draw else 0} (expected 5)")
         
         self.historical = historical_draws
         self.machines = machine_draws
@@ -80,12 +92,16 @@ class IntelligenceEngine:
             count_machine_then_win = 0
             
             for i in range(lag, self.T):
-                # Check if k was in machine at t-lag
-                if k in self.machines[i - lag]:
-                    count_machine += 1
-                    # Check if k appears in winning at t
-                    if k in self.historical[i]:
-                        count_machine_then_win += 1
+                # Check bounds before accessing
+                if i - lag < 0 or i - lag >= len(self.machines) or i >= len(self.historical):
+                    continue
+                # Check if k was in machine at t-lag - with bounds checking
+                if 0 <= i - lag < len(self.machines):
+                    if k in self.machines[i - lag]:
+                        count_machine += 1
+                        # Check if k appears in winning at t - with bounds checking
+                        if i < len(self.historical) and k in self.historical[i]:
+                            count_machine_then_win += 1
             
             if count_machine > 0:
                 lag_probs[lag] = count_machine_then_win / count_machine
@@ -179,14 +195,16 @@ class IntelligenceEngine:
         Number State Model: Determine state of number k
         States: Dormant, Warming, Active, Overheated, Breakout
         """
-        # Recent activity
-        recent_wins = sum(1 for i in range(max(0, self.T - 10), self.T) if k in self.historical[i])
-        recent_machines = sum(1 for i in range(max(0, self.T - 10), self.T) if k in self.machines[i])
+        # Recent activity - with bounds checking
+        recent_wins = sum(1 for i in range(max(0, self.T - 10), min(self.T, len(self.historical))) 
+                         if i < len(self.historical) and k in self.historical[i])
+        recent_machines = sum(1 for i in range(max(0, self.T - 10), min(self.T, len(self.machines))) 
+                             if i < len(self.machines) and k in self.machines[i])
         
-        # Time since last win
+        # Time since last win - with bounds checking
         last_win_idx = None
-        for i in range(self.T - 1, -1, -1):
-            if k in self.historical[i]:
+        for i in range(min(self.T - 1, len(self.historical) - 1), -1, -1):
+            if 0 <= i < len(self.historical) and k in self.historical[i]:
                 last_win_idx = i
                 break
         
@@ -382,9 +400,17 @@ class IntelligenceEngine:
             
             if self._lag_signatures:
                 lag_sorted = sorted(self._lag_signatures.items(), key=lambda x: x[1], reverse=True)
-                top_lag = [n for n, _ in lag_sorted[:20]]
+                top_lag = [n for n, _ in lag_sorted[:20]] if lag_sorted else []
                 # Select deterministically: top 3 lag + 2 from high scores
-                ticket = sorted(top_lag[:3] + [n for n, _ in sorted_numbers[:15] if n not in top_lag[:3]][:2])
+                top_lag_slice = top_lag[:3] if len(top_lag) >= 3 else top_lag
+                other_nums = [n for n, _ in sorted_numbers[:15] if n not in top_lag_slice][:2]
+                ticket = sorted(top_lag_slice + other_nums)
+                if len(ticket) < 5:
+                    # Pad with top numbers if needed
+                    for n, _ in sorted_numbers:
+                        if n not in ticket and len(ticket) < 5:
+                            ticket.append(n)
+                    ticket = sorted(ticket[:5])
             else:
                 # Fallback if lag signatures not available
                 ticket = sorted([n for n, _ in sorted_numbers[:5]])
@@ -406,7 +432,7 @@ class IntelligenceEngine:
             if self._family_clusters is None:
                 self._family_clusters = self.compute_family_clusters()
             
-            # Find largest family
+            # Find the largest family
             largest_family = max(self._family_clusters.values(), key=len) if self._family_clusters else []
             if len(largest_family) >= 3:
                 # Take 3 from family, 2 from top scores
@@ -428,9 +454,9 @@ class IntelligenceEngine:
                 
                 if self._lag_signatures:
                     lag_sorted = sorted(self._lag_signatures.items(), key=lambda x: x[1], reverse=True)
-                    lag_nums = [n for n, _ in lag_sorted[:10] if n not in breakout_nums][:3]
+                    lag_nums = [n for n, _ in lag_sorted[:10] if n not in breakout_nums][:3] if lag_sorted else []
                 else:
-                    lag_nums = [n for n, _ in sorted_numbers[:10] if n not in breakout_nums][:3]
+                    lag_nums = [n for n, _ in sorted_numbers[:10] if n not in breakout_nums][:3] if sorted_numbers else []
                 
                 ticket = sorted(breakout_nums + lag_nums)
                 if len(ticket) == 5:
@@ -456,6 +482,15 @@ class IntelligenceEngine:
             if len(top_20) >= 2:
                 ticket.append(top_20[0])  # Top score
                 ticket.append(top_20[1])  # Second top
+            elif len(top_20) >= 1:
+                ticket.append(top_20[0])  # At least one
+            else:
+                # If top_20 is empty, use top 2 from sorted_numbers
+                if len(sorted_numbers) >= 2:
+                    ticket.append(sorted_numbers[0][0])
+                    ticket.append(sorted_numbers[1][0])
+                elif len(sorted_numbers) >= 1:
+                    ticket.append(sorted_numbers[0][0])
             
             # High lag (ensure we have lag signatures)
             if self._lag_signatures is None:

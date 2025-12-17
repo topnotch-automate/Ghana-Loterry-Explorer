@@ -52,13 +52,40 @@ CORS(app)  # Allow cross-origin requests from Node.js backend
 # Global oracle instance (initialized on first request)
 oracle_instance = None
 historical_draws_cache = None
+oracle_initializing = False  # Lock to prevent concurrent initialization
 
 
 def initialize_oracle(draws: List[List[int]]) -> EnhancedLottoOracle:
     """Initialize or reinitialize the oracle with new data"""
-    global oracle_instance
-    oracle_instance = EnhancedLottoOracle(draws)
-    return oracle_instance
+    global oracle_instance, oracle_initializing
+    
+    # Prevent concurrent initialization
+    if oracle_initializing:
+        print("WARNING: Oracle is already initializing, waiting...")
+        import time
+        max_wait = 60  # Wait up to 60 seconds
+        waited = 0
+        while oracle_initializing and waited < max_wait:
+            time.sleep(1)
+            waited += 1
+        if oracle_instance is not None:
+            return oracle_instance
+    
+    try:
+        oracle_initializing = True
+        print(f"Initializing oracle with {len(draws)} draws...")
+        oracle_instance = EnhancedLottoOracle(draws)
+        print(f"Oracle initialized successfully")
+        return oracle_instance
+    except Exception as e:
+        print(f"ERROR initializing oracle: {e}")
+        import traceback
+        traceback.print_exc()
+        # Don't leave oracle_instance as None - try to create a minimal instance
+        oracle_instance = None
+        raise
+    finally:
+        oracle_initializing = False
 
 
 @app.route('/health', methods=['GET'])
@@ -101,27 +128,77 @@ def predict():
         if not draws or not isinstance(draws, list):
             return jsonify({'error': 'Invalid draws format. Expected list of lists'}), 400
         
-        # Validate each draw
-        for draw in draws:
-            if not isinstance(draw, list) or len(draw) != 5:
-                return jsonify({'error': 'Each draw must be a list of exactly 5 numbers'}), 400
-            if not all(isinstance(n, int) and 1 <= n <= 90 for n in draw):
-                return jsonify({'error': 'Numbers must be integers between 1 and 90'}), 400
+        # Validate and normalize winning draws first - ensure all are exactly 5 numbers
+        valid_draws = []
+        for i, win_draw in enumerate(draws):
+            if not win_draw or not isinstance(win_draw, list):
+                print(f"Warning: Draw {i} has invalid winning numbers (not a list). Skipping.")
+                continue
+            if len(win_draw) != 5:
+                print(f"Warning: Draw {i} has {len(win_draw)} winning numbers (expected 5). Skipping.")
+                continue
+            if not all(isinstance(n, int) and 1 <= n <= 90 for n in win_draw):
+                print(f"Warning: Draw {i} has winning numbers out of range. Skipping.")
+                continue
+            valid_draws.append(win_draw)
         
-        # Validate machine draws if provided
-        # For intelligence strategy, we'll filter, so length mismatch is okay
-        if machine_draws:
-            if strategy != 'intelligence' and len(machine_draws) != len(draws):
-                return jsonify({'error': 'Machine draws must have same length as winning draws'}), 400
-            for mach_draw in machine_draws:
-                # For intelligence strategy, empty/invalid machine draws will be filtered out
-                if strategy == 'intelligence':
-                    # Skip validation - will be filtered later
-                    continue
-                if not isinstance(mach_draw, list) or len(mach_draw) != 5:
-                    return jsonify({'error': 'Each machine draw must be a list of exactly 5 numbers'}), 400
-                if not all(isinstance(n, int) and 1 <= n <= 90 for n in mach_draw):
-                    return jsonify({'error': 'Machine numbers must be integers between 1 and 90'}), 400
+        if len(valid_draws) < 50:
+            return jsonify({'error': f'Insufficient valid draws. Need at least 50, got {len(valid_draws)}'}), 400
+        
+        draws = valid_draws
+        
+        # Handle machine draws - fill missing with zeros or use winning numbers
+        # Don't throw errors, just normalize the data
+        if not machine_draws or len(machine_draws) == 0:
+            # No machine draws provided - fill with zeros (exactly 5 zeros per draw)
+            machine_draws = [[0, 0, 0, 0, 0] for _ in draws]
+            print(f"Warning: No machine_draws provided. Filling with zeros for {len(draws)} draws.")
+        elif len(machine_draws) != len(draws):
+            # Length mismatch - pad or truncate to match draws length
+            if len(machine_draws) < len(draws):
+                # Pad with zeros for missing entries (exactly 5 zeros per entry)
+                missing_count = len(draws) - len(machine_draws)
+                machine_draws.extend([[0, 0, 0, 0, 0] for _ in range(missing_count)])
+                print(f"Warning: machine_draws length ({len(machine_draws) - missing_count}) < draws length ({len(draws)}). Padded {missing_count} entries with zeros.")
+            else:
+                # Truncate to match draws length
+                machine_draws = machine_draws[:len(draws)]
+                print(f"Warning: machine_draws length ({len(machine_draws)}) > draws length ({len(draws)}). Truncated to match.")
+        
+        # Normalize each machine draw - ensure exactly 5 numbers per draw
+        normalized_machine_draws = []
+        for i, mach_draw in enumerate(machine_draws):
+            if not mach_draw or not isinstance(mach_draw, list):
+                # Invalid machine draw - use zeros (exactly 5 zeros)
+                normalized_machine_draws.append([0, 0, 0, 0, 0])
+                print(f"Warning: Draw {i} has invalid machine numbers (not a list). Using zeros.")
+            elif len(mach_draw) != 5:
+                # Wrong length - normalize to exactly 5
+                if len(mach_draw) > 5:
+                    print(f"Warning: Draw {i} has {len(mach_draw)} machine numbers, truncating to 5.")
+                    normalized_machine_draws.append(mach_draw[:5])
+                else:  # len(mach_draw) < 5
+                    print(f"Warning: Draw {i} has {len(mach_draw)} machine numbers, padding with zeros to 5.")
+                    normalized = mach_draw + [0] * (5 - len(mach_draw))
+                    normalized_machine_draws.append(normalized)
+            elif not all(isinstance(n, int) and 0 <= n <= 90 for n in mach_draw):
+                # Some numbers out of range - use zeros (exactly 5 zeros)
+                normalized_machine_draws.append([0, 0, 0, 0, 0])
+                print(f"Warning: Draw {i} has machine numbers out of range. Using zeros.")
+            else:
+                # Valid machine draw - already exactly 5 numbers
+                normalized_machine_draws.append(mach_draw)
+        
+        # Final validation: ensure all normalized machine draws are exactly 5 numbers
+        for i, mach_draw in enumerate(normalized_machine_draws):
+            if len(mach_draw) != 5:
+                print(f"ERROR: Normalized machine draw {i} has {len(mach_draw)} numbers! This should never happen. Fixing...")
+                if len(mach_draw) > 5:
+                    normalized_machine_draws[i] = mach_draw[:5]
+                else:
+                    normalized_machine_draws[i] = mach_draw + [0] * (5 - len(mach_draw))
+        
+        machine_draws = normalized_machine_draws
         
         # Filter machine numbers for strategies that need them (intelligence and ensemble)
         # Do this BEFORE checking minimum requirements, as filtering may reduce the count
@@ -131,7 +208,8 @@ def predict():
             filtered_draws = []
             filtered_machines = []
             for i, (win_draw, mach_draw) in enumerate(zip(draws, machine_draws)):
-                if mach_draw and len(mach_draw) == 5 and all(1 <= n <= 90 for n in mach_draw):
+                # Check if machine draw is valid (not all zeros, length 5, all numbers in range 1-90)
+                if mach_draw and len(mach_draw) == 5 and all(isinstance(n, int) and 1 <= n <= 90 for n in mach_draw) and not all(n == 0 for n in mach_draw):
                     filtered_draws.append(win_draw)
                     filtered_machines.append(mach_draw)
             
@@ -174,20 +252,44 @@ def predict():
             }), 400
         
         # Initialize or update oracle if data changed
-        global historical_draws_cache
+        global historical_draws_cache, oracle_instance
         # Use a more robust comparison (convert to tuples for comparison)
         draws_tuple = tuple(tuple(sorted(d)) for d in draws)
-        if historical_draws_cache != draws_tuple:
+        if historical_draws_cache != draws_tuple or oracle_instance is None:
             historical_draws_cache = draws_tuple
-            initialize_oracle(draws)
+            try:
+                initialize_oracle(draws)
+            except Exception as e:
+                print(f"ERROR: Failed to initialize oracle: {e}")
+                return jsonify({
+                    'error': 'Oracle initialization failed',
+                    'message': str(e)
+                }), 500
+        
+        # Double-check oracle is initialized
+        if oracle_instance is None:
+            return jsonify({
+                'error': 'Oracle not initialized',
+                'message': 'The prediction oracle is not available. Please try again.'
+            }), 500
         
         # Generate predictions (now deterministic based on data + strategy)
         print(f"DEBUG: About to call generate_predictions with strategy={strategy}, draws={len(draws)}, machine_draws={'present' if machine_draws else 'None'} ({len(machine_draws) if machine_draws else 0} entries)")
-        predictions = oracle_instance.generate_predictions(
-            strategy=strategy,
-            n_predictions=n_predictions,
-            machine_draws=machine_draws if machine_draws else None
-        )
+        try:
+            predictions = oracle_instance.generate_predictions(
+                strategy=strategy,
+                n_predictions=n_predictions,
+                machine_draws=machine_draws if machine_draws else None
+            )
+        except Exception as e:
+            print(f"ERROR: generate_predictions failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({
+                'error': 'Prediction generation failed',
+                'message': str(e)
+            }), 500
+        
         print(f"DEBUG: generate_predictions returned: {predictions}")
         print(f"DEBUG: predictions.keys() = {list(predictions.keys())}")
         if 'intelligence' in predictions:
@@ -220,6 +322,21 @@ def predict():
                     predictions['intelligence'] = [[1, 2, 3, 4, 5]]
         
         for method, preds in predictions.items():
+            # Skip internal keys (like _confidence)
+            if method.startswith('_'):
+                continue
+            
+            # Special handling for two_sure and three_direct (not 5-number predictions)
+            if method in ['two_sure', 'three_direct']:
+                if preds and len(preds) > 0 and isinstance(preds[0], list):
+                    # These are special features - just store the numbers
+                    result[method] = {
+                        'numbers': make_json_serializable(preds[0]),
+                        'count': len(preds[0]),
+                        'type': 'two_sure' if method == 'two_sure' else 'three_direct'
+                    }
+                continue
+            
             # Special handling for intelligence strategy - provide fallback if empty
             if not preds or len(preds) == 0:
                 if method == 'intelligence':
@@ -270,9 +387,13 @@ def predict():
         # Debug: Log what we're returning
         print(f"Returning predictions with methods: {list(result.keys())}")
         for method, preds in result.items():
-            print(f"  {method}: {len(preds)} prediction(s)")
-            if preds and len(preds) > 0:
-                print(f"    First prediction: {preds[0].get('numbers', 'N/A')}")
+            # Handle two_sure and three_direct which are stored as dicts, not lists
+            if method in ['two_sure', 'three_direct']:
+                print(f"  {method}: {preds.get('numbers', 'N/A')}")
+            elif isinstance(preds, list):
+                print(f"  {method}: {len(preds)} prediction(s)")
+                if preds and len(preds) > 0 and isinstance(preds[0], dict):
+                    print(f"    First prediction: {preds[0].get('numbers', 'N/A')}")
         
         # Also log what was in the original predictions dict
         print(f"Original predictions dict keys: {list(predictions.keys())}")
@@ -296,12 +417,31 @@ def predict():
             # Convert all values to JSON-serializable types
             regime_info = make_json_serializable(regime_info)
         
+        # Extract confidence scores from predictions (stored under _confidence key)
+        confidence_info = None
+        if '_confidence' in predictions:
+            confidence_info = make_json_serializable(predictions['_confidence'])
+            # Remove from result dict (already extracted)
+            if '_confidence' in result:
+                del result['_confidence']
+        
+        # Get trend information if available
+        trend_info = None
+        if hasattr(oracle_instance, '_trend_data') and oracle_instance._trend_data:
+            trend_info = {
+                'rising': oracle_instance._trend_data.get('rising', [])[:10],
+                'falling': oracle_instance._trend_data.get('falling', [])[:10],
+                'accelerating': oracle_instance._trend_data.get('accelerating', [])[:5]
+            }
+        
         # Ensure all values in response are JSON-serializable
         response_data = {
             'success': True,
             'predictions': make_json_serializable(result),
             'strategy': str(strategy),
             'regime_change': regime_info,
+            'confidence': confidence_info,
+            'trend_analysis': trend_info,
             'data_points_used': int(len(draws))
         }
         

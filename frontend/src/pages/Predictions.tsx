@@ -39,6 +39,15 @@ const strategyInfo: Record<PredictionStrategy, { icon: string; description: stri
   },
 };
 
+// Interface for saved special predictions (matching Dashboard)
+interface SavedSpecialPrediction {
+  id: string;
+  type: 'two_sure' | 'three_direct';
+  numbers: number[];
+  lottoType?: string;
+  createdAt: string;
+}
+
 export const Predictions: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
   const { subscription, loading: subscriptionLoading } = useSubscription();
@@ -54,6 +63,11 @@ export const Predictions: React.FC = () => {
   const [loadingTypes, setLoadingTypes] = useState(false);
   const [savingPrediction, setSavingPrediction] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // State for saving Two Sure / Three Direct to Dashboard
+  const [savingTwoSure, setSavingTwoSure] = useState(false);
+  const [savingThreeDirect, setSavingThreeDirect] = useState(false);
+  const [specialSaveSuccess, setSpecialSaveSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -141,6 +155,83 @@ export const Predictions: React.FC = () => {
       setError(handleApiError(err));
     } finally {
       setSavingPrediction(false);
+    }
+  };
+
+  // Helper function to save to localStorage (for Dashboard display)
+  const saveToLocalStorage = (type: 'two_sure' | 'three_direct', numbers: number[]) => {
+    const newPrediction: SavedSpecialPrediction = {
+      id: `${type}-${Date.now()}`,
+      type,
+      numbers,
+      lottoType: selectedLottoType || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    
+    // Load existing saved predictions
+    const existing = localStorage.getItem('savedSpecialPredictions');
+    const parsed: SavedSpecialPrediction[] = existing ? JSON.parse(existing) : [];
+    
+    // Add new prediction and keep max 20
+    const updated = [newPrediction, ...parsed].slice(0, 20);
+    localStorage.setItem('savedSpecialPredictions', JSON.stringify(updated));
+  };
+
+  // Save Two Sure to Dashboard (both API and localStorage)
+  const handleSaveTwoSureToDashboard = async () => {
+    if (!predictions?.predictions.two_sure) return;
+    
+    setSavingTwoSure(true);
+    try {
+      const numbers = predictions.predictions.two_sure.numbers;
+      
+      // Save to backend API (like regular predictions)
+      await predictionsApi.savePrediction({
+        numbers,
+        strategy: 'two_sure',
+        lottoType: selectedLottoType || undefined,
+        targetDrawDate: new Date().toISOString().split('T')[0],
+      });
+      
+      // Also save to localStorage for Dashboard display
+      saveToLocalStorage('two_sure', numbers);
+      
+      setSpecialSaveSuccess('Two Sure saved to Dashboard!');
+      setTimeout(() => setSpecialSaveSuccess(null), 3000);
+    } catch (err) {
+      console.error('Failed to save Two Sure:', err);
+      setError(handleApiError(err));
+    } finally {
+      setSavingTwoSure(false);
+    }
+  };
+
+  // Save Three Direct to Dashboard (both API and localStorage)
+  const handleSaveThreeDirectToDashboard = async () => {
+    if (!predictions?.predictions.three_direct) return;
+    
+    setSavingThreeDirect(true);
+    try {
+      const numbers = predictions.predictions.three_direct.numbers;
+      
+      // Save to backend API (like regular predictions)
+      await predictionsApi.savePrediction({
+        numbers,
+        strategy: 'three_direct',
+        lottoType: selectedLottoType || undefined,
+        targetDrawDate: new Date().toISOString().split('T')[0],
+      });
+      
+      // Also save to localStorage for Dashboard display
+      saveToLocalStorage('three_direct', numbers);
+      
+      setSpecialSaveSuccess('Three Direct saved to Dashboard!');
+      setTimeout(() => setSpecialSaveSuccess(null), 3000);
+    } catch (err) {
+      console.error('Failed to save Three Direct:', err);
+      setError(handleApiError(err));
+    } finally {
+      setSavingThreeDirect(false);
     }
   };
 
@@ -471,12 +562,145 @@ export const Predictions: React.FC = () => {
             </div>
           )}
 
+          {/* Two Sure and Three Direct - Featured Section */}
+          {(predictions.predictions.two_sure || predictions.predictions.three_direct) && (
+            <div className="card bg-gradient-to-br from-yellow-50 via-amber-50 to-orange-50 border-2 border-amber-300 shadow-xl">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
+                    <span className="text-2xl">⭐</span>
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-800">Ghana Lottery Special Features</h2>
+                </div>
+                {selectedLottoType && (
+                  <span className="px-3 py-1 bg-amber-200 text-amber-800 rounded-full text-sm font-medium">
+                    {selectedLottoType}
+                  </span>
+                )}
+              </div>
+
+              {/* Save success message */}
+              {specialSaveSuccess && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm flex items-center gap-2">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  {specialSaveSuccess}
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Two Sure */}
+                {predictions.predictions.two_sure && (
+                  <div className="bg-white rounded-xl p-6 border-2 border-amber-200 shadow-lg hover:shadow-xl transition-all">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                          2
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-800">Two Sure</h3>
+                          <p className="text-sm text-gray-600">2 most likely numbers to play</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleSaveTwoSureToDashboard}
+                        disabled={savingTwoSure}
+                        className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-200 transition-colors flex items-center gap-1"
+                        title="Save to Dashboard"
+                      >
+                        {savingTwoSure ? (
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                          </svg>
+                        )}
+                        Save
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      {predictions.predictions.two_sure.numbers.map((num, index) => (
+                        <div
+                          key={num}
+                          className="number-chip number-chip-winning text-2xl font-bold w-16 h-16 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:scale-110 transition-all bg-gradient-to-br from-green-400 to-emerald-500 text-white rounded-full"
+                          style={{ animationDelay: `${index * 100}ms` }}
+                        >
+                          {num}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 text-center">
+                      <p className="text-xs text-gray-500 italic">
+                        Based on consensus across all prediction strategies
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Three Direct */}
+                {predictions.predictions.three_direct && (
+                  <div className="bg-white rounded-xl p-6 border-2 border-amber-200 shadow-lg hover:shadow-xl transition-all">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                          3
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-800">Three Direct</h3>
+                          <p className="text-sm text-gray-600">3 most likely numbers to play</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleSaveThreeDirectToDashboard}
+                        disabled={savingThreeDirect}
+                        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-200 transition-colors flex items-center gap-1"
+                        title="Save to Dashboard"
+                      >
+                        {savingThreeDirect ? (
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                          </svg>
+                        )}
+                        Save
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      {predictions.predictions.three_direct.numbers.map((num, index) => (
+                        <div
+                          key={num}
+                          className="number-chip number-chip-winning text-2xl font-bold w-16 h-16 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:scale-110 transition-all bg-gradient-to-br from-blue-400 to-cyan-500 text-white rounded-full"
+                          style={{ animationDelay: `${index * 100}ms` }}
+                        >
+                          {num}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 text-center">
+                      <p className="text-xs text-gray-500 italic">
+                        Based on consensus across all prediction strategies
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Prediction Cards */}
           <div>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-800">Your Predictions</h2>
               <span className="px-3 py-1 bg-primary-100 text-primary-700 rounded-full text-sm font-medium">
-                {Object.values(predictions.predictions).flat().length} set{Object.values(predictions.predictions).flat().length !== 1 ? 's' : ''}
+                {Object.values(predictions.predictions).filter((p) => Array.isArray(p)).flat().length} set{Object.values(predictions.predictions).filter((p) => Array.isArray(p)).flat().length !== 1 ? 's' : ''}
               </span>
             </div>
 

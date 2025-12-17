@@ -10,22 +10,51 @@ interface PredictionRequest {
   n_predictions?: number;
 }
 
+// Special prediction types for "two sure" and "three direct" features
+interface SpecialPrediction {
+  numbers: number[];
+  count: number;
+  type: 'two_sure' | 'three_direct';
+}
+
+interface StandardPrediction {
+  numbers: number[];
+  sum: number;
+  evens: number;
+  highs: number;
+}
+
+// Confidence scoring for predictions
+interface ConfidenceScore {
+  confidence: number;
+  level: 'high' | 'medium' | 'low' | 'very_low' | 'invalid';
+  factors: {
+    zone_diversity: number;
+    gap_pattern: number;
+    pattern_validity: number;
+    position_alignment: number;
+    strategy_agreement: number;
+    historical_frequency: number;
+  };
+  recommendation: string;
+}
+
+// Trend analysis data
+interface TrendAnalysis {
+  rising: number[];      // Numbers with rising trend
+  falling: number[];     // Numbers with falling trend
+  accelerating: number[]; // Numbers with accelerating momentum
+}
+
 interface PredictionResponse {
   success: boolean;
   predictions: {
-    [key: string]: Array<{
-      numbers: number[];
-      sum: number;
-      evens: number;
-      highs: number;
-    }>;
+    [key: string]: Array<StandardPrediction> | SpecialPrediction;
     // Explicitly include intelligence for type safety
-    intelligence?: Array<{
-      numbers: number[];
-      sum: number;
-      evens: number;
-      highs: number;
-    }>;
+    intelligence?: Array<StandardPrediction>;
+    // Special features: two_sure and three_direct are stored as objects, not arrays
+    two_sure?: SpecialPrediction;
+    three_direct?: SpecialPrediction;
   };
   strategy: string;
   regime_change?: {
@@ -33,6 +62,9 @@ interface PredictionResponse {
     confidence: number;
     details?: Record<string, string>;
   };
+  // New enhanced fields
+  confidence?: Record<string, ConfidenceScore>;
+  trend_analysis?: TrendAnalysis;
   data_points_used: number;
 }
 
@@ -77,22 +109,50 @@ export class PredictionService {
         );
       }
       
+      // Map and filter in pairs to keep arrays aligned
+      const winning: number[][] = [];
+      const machine: number[][] = [];
+      
+      for (const draw of filtered) {
+        if (!draw.winningNumbers || !Array.isArray(draw.winningNumbers) || draw.winningNumbers.length === 0) {
+          logger.warn(`Draw ${draw.id || 'unknown'} has invalid winningNumbers, skipping`);
+          continue;
+        }
+        if (!draw.machineNumbers || !Array.isArray(draw.machineNumbers) || draw.machineNumbers.length === 0) {
+          logger.warn(`Draw ${draw.id || 'unknown'} has invalid machineNumbers, skipping`);
+          continue;
+        }
+        winning.push([...draw.winningNumbers].sort((a, b) => a - b));
+        machine.push([...draw.machineNumbers].sort((a, b) => a - b));
+      }
+      
       return {
-        winning: filtered.map((draw) => [...draw.winningNumbers].sort((a, b) => a - b)),
-        machine: filtered.map((draw) => [...draw.machineNumbers].sort((a, b) => a - b)),
-        filteredCount: filtered.length,
+        winning,
+        machine,
+        filteredCount: winning.length,
       };
     }
     
     // For other strategies, include all draws (machine numbers optional)
-    return {
-      winning: draws.map((draw) => [...draw.winningNumbers].sort((a, b) => a - b)),
-      machine: draws.map((draw) => 
-        draw.machineNumbers && draw.machineNumbers.length === 5
-          ? [...draw.machineNumbers].sort((a, b) => a - b)
-          : [] // Empty array for draws without machine numbers
-      ),
-    };
+    const winning: number[][] = [];
+    const machine: number[][] = [];
+    
+    for (const draw of draws) {
+      if (!draw.winningNumbers || !Array.isArray(draw.winningNumbers) || draw.winningNumbers.length === 0) {
+        logger.warn(`Draw ${draw.id || 'unknown'} has invalid winningNumbers, skipping`);
+        continue;
+      }
+      winning.push([...draw.winningNumbers].sort((a, b) => a - b));
+      
+      // Machine numbers: use zeros if missing or invalid
+      if (!draw.machineNumbers || !Array.isArray(draw.machineNumbers) || draw.machineNumbers.length !== 5) {
+        machine.push([0, 0, 0, 0, 0]);
+      } else {
+        machine.push([...draw.machineNumbers].sort((a, b) => a - b));
+      }
+    }
+    
+    return { winning, machine };
   }
 
   /**
@@ -178,13 +238,78 @@ export class PredictionService {
       }
 
       // Convert to Python format (filters for intelligence strategy)
-      const { winning, machine, filteredCount } = this.convertDrawsToPythonFormat(draws, strategy);
+      const converted = this.convertDrawsToPythonFormat(draws, strategy);
+      let winning = converted.winning;
+      let machine = converted.machine;
+      const filteredCount = converted.filteredCount;
+
+      // Validate that we have valid data after conversion
+      if (!winning || !Array.isArray(winning) || winning.length === 0) {
+        throw new Error(
+          `No valid winning numbers found after conversion. ` +
+          `Original draw count: ${draws.length}`
+        );
+      }
 
       // Check minimum data requirement after filtering (for intelligence strategy)
       if (strategy === 'intelligence' && filteredCount !== undefined && filteredCount < 50) {
         throw new Error(
           `Insufficient data with machine numbers: Need at least 50 draws with valid machine numbers. ` +
           `Found ${filteredCount} draws with machine numbers out of ${draws.length} total draws.`
+        );
+      }
+
+      // Ensure machine array exists and matches winning array length (pad with zeros if needed)
+      if (!machine || !Array.isArray(machine)) {
+        logger.warn('Machine numbers array is missing or invalid, creating array of zeros');
+        machine = Array(winning.length).fill(null).map(() => [0, 0, 0, 0, 0]);
+      }
+      
+      if (machine.length !== winning.length) {
+        logger.warn(
+          `Machine numbers array length (${machine.length}) doesn't match winning numbers array length (${winning.length}). ` +
+          `Padding with zeros.`
+        );
+        while (machine.length < winning.length) {
+          machine.push([0, 0, 0, 0, 0]);
+        }
+        machine.splice(winning.length); // Truncate if longer
+      }
+      
+      // Validate that all winning arrays have 5 numbers
+      const validWinning: number[][] = [];
+      const validMachine: number[][] = [];
+      for (let i = 0; i < winning.length; i++) {
+        // Safely check if winning[i] exists and is valid
+        const winDraw = winning[i];
+        if (winDraw && Array.isArray(winDraw) && winDraw.length === 5) {
+          // Validate all numbers are in range
+          if (winDraw.every(n => typeof n === 'number' && n >= 1 && n <= 90)) {
+            validWinning.push(winDraw);
+            // Ensure corresponding machine entry is valid - safely check bounds
+            const machDraw = (i < machine.length && machine[i] !== undefined) ? machine[i] : undefined;
+            if (machDraw && Array.isArray(machDraw) && machDraw.length === 5 && 
+                machDraw.every(n => typeof n === 'number' && n >= 0 && n <= 90)) {
+              validMachine.push(machDraw);
+            } else {
+              validMachine.push([0, 0, 0, 0, 0]);
+            }
+          } else {
+            logger.warn(`Skipping winning draw at index ${i}: contains invalid numbers`);
+          }
+        } else {
+          logger.warn(`Skipping invalid winning draw at index ${i}: ${winDraw ? `length=${winDraw.length || 0}` : 'missing'}`);
+        }
+      }
+      
+      winning = validWinning;
+      machine = validMachine;
+      
+      // Final validation after cleanup
+      if (winning.length === 0) {
+        throw new Error(
+          `No valid winning numbers found after validation. ` +
+          `Original draw count: ${draws.length}`
         );
       }
 
@@ -223,9 +348,34 @@ export class PredictionService {
       if (axios.isAxiosError(error)) {
         if (error.response) {
           // Python service returned an error
-          throw new Error(
-            error.response.data?.message || error.response.data?.error || 'Prediction service error'
-          );
+          try {
+            const errorData = error.response.data;
+            let errorMessage = 'Prediction service error';
+            
+            if (typeof errorData === 'string') {
+              errorMessage = errorData;
+            } else if (typeof errorData === 'object' && errorData !== null) {
+              // Safely access error properties
+              if ('message' in errorData && typeof errorData.message === 'string') {
+                errorMessage = errorData.message;
+              } else if ('error' in errorData && typeof errorData.error === 'string') {
+                errorMessage = errorData.error;
+              } else if (Array.isArray(errorData)) {
+                // Handle array responses - safely access first element
+                if (errorData.length > 0 && errorData[0] !== undefined && errorData[0] !== null) {
+                  errorMessage = String(errorData[0]);
+                } else {
+                  errorMessage = 'Prediction service returned an array error with no message';
+                }
+              }
+            }
+            
+            throw new Error(errorMessage);
+          } catch (err) {
+            // If error extraction fails, use a generic message
+            logger.error('Error extracting error message from Python service response', err);
+            throw new Error('Prediction service returned an error. Please check the service logs.');
+          }
         } else if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
           // Request timed out
           const timeout = this.calculateTimeout(draws.length, strategy);
@@ -253,11 +403,15 @@ export class PredictionService {
         throw new Error(`Need at least 50 draws for analysis. Got ${draws.length}`);
       }
 
-      const pythonDraws = this.convertDrawsToPythonFormat(draws);
+      const { winning } = this.convertDrawsToPythonFormat(draws);
+
+      if (!winning || winning.length === 0) {
+        throw new Error(`No valid winning numbers found after conversion. Original draw count: ${draws.length}`);
+      }
 
       const response = await axios.post(
         `${this.pythonServiceUrl}/analyze`,
-        { draws: pythonDraws },
+        { draws: winning },
         {
           timeout: 30000,
           headers: {

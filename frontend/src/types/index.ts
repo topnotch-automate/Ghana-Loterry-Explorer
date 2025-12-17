@@ -68,6 +68,12 @@ export interface PredictionSet {
   highs: number;
 }
 
+export interface TwoSureThreeDirect {
+  numbers: number[];
+  count: number;
+  type: 'two_sure' | 'three_direct';
+}
+
 export interface PredictionResponse {
   success: boolean;
   predictions: {
@@ -76,6 +82,8 @@ export interface PredictionResponse {
     pattern?: PredictionSet[];
     ensemble?: PredictionSet[];
     intelligence?: PredictionSet[]; // Added for intelligence strategy
+    two_sure?: TwoSureThreeDirect; // Two Sure feature - 2 most likely numbers
+    three_direct?: TwoSureThreeDirect; // Three Direct feature - 3 most likely numbers
   };
   strategy: string;
   regime_change?: {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { drawService } from '../services/drawService.ts';
 import { predictionService } from '../services/predictionService.ts';
+import { triggerManualCheck } from '../services/predictionScheduler.ts';
 import { requireAuth, requirePro, optionalAuth } from '../middleware/auth.ts';
 import { logger } from '../utils/logger.ts';
 import pool from '../database/db.ts';
@@ -283,9 +284,9 @@ router.get('/history', requireAuth, async (req, res, next) => {
         drawDate: row.actual_draw_date,
         winningNumbers: row.actual_winning_numbers,
       } : null,
-      // Win/loss indicator: 3+ matches is considered a "win"
+      // Win/loss indicator: 2+ matches is a "win", 1 match is "partial", 0 is "loss"
       status: row.is_checked 
-        ? (row.matches >= 3 ? 'win' : row.matches >= 1 ? 'partial' : 'loss')
+        ? (row.matches >= 2 ? 'win' : row.matches >= 1 ? 'partial' : 'loss')
         : 'pending',
     }));
 
@@ -302,17 +303,20 @@ router.get('/history', requireAuth, async (req, res, next) => {
 /**
  * POST /api/predictions/save
  * Save a prediction manually (for future reference)
+ * Accepts 2 numbers (two_sure), 3 numbers (three_direct), or 5 numbers (standard)
  */
 router.post('/save', requireAuth, requirePro, async (req, res, next) => {
   try {
     const userId = req.user!.id;
     const { numbers, strategy, lottoType, targetDrawDate } = req.body;
 
-    if (!numbers || !Array.isArray(numbers) || numbers.length !== 5) {
+    // Accept 2 (two_sure), 3 (three_direct), or 5 (standard) numbers
+    const validLengths = [2, 3, 5];
+    if (!numbers || !Array.isArray(numbers) || !validLengths.includes(numbers.length)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid prediction',
-        message: 'Must provide exactly 5 numbers',
+        message: 'Must provide 2, 3, or 5 numbers',
       });
     }
 
@@ -325,6 +329,11 @@ router.post('/save', requireAuth, requirePro, async (req, res, next) => {
       });
     }
 
+    // Determine prediction type based on strategy or number count
+    let predictionType = strategy || 'manual';
+    if (numbers.length === 2 && !strategy) predictionType = 'two_sure';
+    if (numbers.length === 3 && !strategy) predictionType = 'three_direct';
+
     const result = await pool.query(
       `INSERT INTO prediction_history (
         user_id, strategy, predicted_numbers, lotto_type, target_draw_date,
@@ -334,11 +343,11 @@ router.post('/save', requireAuth, requirePro, async (req, res, next) => {
        RETURNING id, created_at`,
       [
         userId,
-        strategy || 'manual',
+        predictionType,
         numbers.sort((a, b) => a - b),
         lottoType || null,
         targetDrawDate || new Date().toISOString().split('T')[0],
-        JSON.stringify({ manual: true, numbers }),
+        JSON.stringify({ manual: true, numbers, type: predictionType }),
       ]
     );
 
@@ -415,7 +424,7 @@ router.post('/check/:predictionId', requireAuth, async (req, res, next) => {
         matches,
         predictedNumbers: row.predicted_numbers,
         actualWinningNumbers: row.actual_winning_numbers,
-        status: matches >= 3 ? 'win' : matches >= 1 ? 'partial' : 'loss',
+        status: matches >= 2 ? 'win' : matches >= 1 ? 'partial' : 'loss',
         isChecked: row.is_checked,
         checkedAt: row.checked_at,
       },
@@ -604,6 +613,125 @@ router.get('/strategy-performance', requireAuth, async (req, res, next) => {
         week,
         month,
         year,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/predictions/check-all
+ * Manually trigger checking all pending predictions against draws
+ * (Admin/Pro users can trigger this manually)
+ */
+router.post('/check-all', requireAuth, requirePro, async (req, res, next) => {
+  try {
+    logger.info(`Manual prediction check triggered by user ${req.user!.id}`);
+    
+    const result = await triggerManualCheck();
+    
+    res.json({
+      success: true,
+      data: {
+        message: 'Prediction check completed',
+        totalChecked: result.totalChecked,
+        predictions: result.predictions.map(p => ({
+          predictionId: p.predictionId,
+          matches: p.matches,
+          predictedNumbers: p.predictedNumbers,
+          winningNumbers: p.winningNumbers,
+          drawDate: p.drawDate,
+          lottoType: p.lottoType,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/predictions/reset-checks
+ * Reset all checked predictions back to unchecked status so they can be re-checked
+ * (Pro users only)
+ */
+router.post('/reset-checks', requireAuth, requirePro, async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    logger.info(`Resetting checked predictions for user ${userId}`);
+    
+    // Reset all checked predictions for this user back to unchecked
+    const result = await pool.query(
+      `UPDATE prediction_history 
+       SET is_checked = FALSE,
+           checked_at = NULL,
+           matches = NULL,
+           actual_draw_id = NULL
+       WHERE user_id = $1
+         AND is_checked = TRUE
+       RETURNING id`,
+      [userId]
+    );
+    
+    const resetCount = result.rows.length;
+    logger.info(`Reset ${resetCount} predictions for user ${userId}`);
+    
+    res.json({
+      success: true,
+      data: {
+        message: `Reset ${resetCount} predictions to unchecked status`,
+        resetCount,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/predictions/reset-and-recheck
+ * Reset all checked predictions and immediately re-check them
+ * (Pro users only)
+ */
+router.post('/reset-and-recheck', requireAuth, requirePro, async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    logger.info(`Reset and recheck triggered by user ${userId}`);
+    
+    // Step 1: Reset all checked predictions for this user
+    const resetResult = await pool.query(
+      `UPDATE prediction_history 
+       SET is_checked = FALSE,
+           checked_at = NULL,
+           matches = NULL,
+           actual_draw_id = NULL
+       WHERE user_id = $1
+         AND is_checked = TRUE
+       RETURNING id`,
+      [userId]
+    );
+    
+    const resetCount = resetResult.rows.length;
+    logger.info(`Reset ${resetCount} predictions for user ${userId}`);
+    
+    // Step 2: Run the check again
+    const checkResult = await triggerManualCheck();
+    
+    res.json({
+      success: true,
+      data: {
+        message: `Reset ${resetCount} predictions and re-checked`,
+        resetCount,
+        totalChecked: checkResult.totalChecked,
+        predictions: checkResult.predictions.map(p => ({
+          predictionId: p.predictionId,
+          matches: p.matches,
+          predictedNumbers: p.predictedNumbers,
+          winningNumbers: p.winningNumbers,
+          drawDate: p.drawDate,
+          lottoType: p.lottoType,
+        })),
       },
     });
   } catch (error) {

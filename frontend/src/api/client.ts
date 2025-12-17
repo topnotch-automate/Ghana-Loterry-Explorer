@@ -444,6 +444,74 @@ export const predictionsApi = {
     }
     return response.data.data;
   },
+
+  /**
+   * Manually trigger checking all pending predictions against draws
+   */
+  checkAllPredictions: async (): Promise<{
+    message: string;
+    totalChecked: number;
+    predictions: Array<{
+      predictionId: string;
+      matches: number;
+      predictedNumbers: number[];
+      winningNumbers: number[];
+      drawDate: string;
+      lottoType: string;
+    }>;
+  }> => {
+    const response = await api.post<ApiResponse<{
+      message: string;
+      totalChecked: number;
+      predictions: Array<{
+        predictionId: string;
+        matches: number;
+        predictedNumbers: number[];
+        winningNumbers: number[];
+        drawDate: string;
+        lottoType: string;
+      }>;
+    }>>('/predictions/check-all');
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to check predictions');
+    }
+    return response.data.data;
+  },
+
+  /**
+   * Reset all checked predictions and re-check them with correct logic
+   */
+  resetAndRecheck: async (): Promise<{
+    message: string;
+    resetCount: number;
+    totalChecked: number;
+    predictions: Array<{
+      predictionId: string;
+      matches: number;
+      predictedNumbers: number[];
+      winningNumbers: number[];
+      drawDate: string;
+      lottoType: string;
+    }>;
+  }> => {
+    const response = await api.post<ApiResponse<{
+      message: string;
+      resetCount: number;
+      totalChecked: number;
+      predictions: Array<{
+        predictionId: string;
+        matches: number;
+        predictedNumbers: number[];
+        winningNumbers: number[];
+        drawDate: string;
+        lottoType: string;
+      }>;
+    }>>('/predictions/reset-and-recheck');
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to reset and recheck predictions');
+    }
+    return response.data.data;
+  },
 };
 
 // Auth API

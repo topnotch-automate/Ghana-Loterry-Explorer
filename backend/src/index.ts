@@ -9,6 +9,7 @@ import seoRouter from './routes/seo.js';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
 import { AppError } from './utils/errors.js';
+import { startScheduler, triggerManualCheck } from './services/predictionScheduler.js';
 
 const app = express();
 
@@ -89,5 +90,9 @@ app.listen(config.port, () => {
   logger.info(`🚀 Server running on http://localhost:${config.port}`);
   logger.info(`📊 API available at http://localhost:${config.port}/api`);
   logger.info(`🌍 Environment: ${config.nodeEnv}`);
+  
+  // Start the prediction check scheduler
+  startScheduler();
+  logger.info(`⏰ Prediction check scheduler started (2 PM & 9 PM daily)`);
 });
 
