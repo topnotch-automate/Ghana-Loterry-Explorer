@@ -254,10 +254,12 @@ export class DrawService {
 
     // Apply mode filter
     if (mode === 'exact') {
+      // Exact 5-number match: either all 5 winning numbers OR all 5 machine numbers match
       sqlQuery += ` AND (
-        SELECT COUNT(*) FROM unnest(d.winning_numbers || d.machine_numbers) AS num WHERE num = ANY($1)
-      ) = $${paramIndex} AND array_length($1, 1) = 10`;
-      params.push(numbers.length);
+        (SELECT COUNT(*) FROM unnest(d.winning_numbers) AS num WHERE num = ANY($1)) = 5
+        OR
+        (SELECT COUNT(*) FROM unnest(d.machine_numbers) AS num WHERE num = ANY($1)) = 5
+      ) AND array_length($1, 1) = 5`;
       paramIndex++;
     } else if (mode === 'group') {
       // Group search: at least 2 numbers from the group must appear together

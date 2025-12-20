@@ -18,6 +18,7 @@ export interface SearchResult extends Draw {
   matchCountWinning?: number;
   matchCountMachine?: number;
   similarityScore?: number;
+  exact?: boolean;
 }
 
 export interface FrequencyStats {
@@ -74,6 +75,13 @@ export interface TwoSureThreeDirect {
   type: 'two_sure' | 'three_direct';
 }
 
+export interface PredictionConfidence {
+  confidence: number; // 0.0 to 1.0
+  level: 'high' | 'medium' | 'low' | 'invalid';
+  factors?: Record<string, number>; // Factor scores (e.g., zone_diversity, gap_pattern, etc.)
+  recommendation?: string; // Recommendation text
+}
+
 export interface PredictionResponse {
   success: boolean;
   predictions: {
@@ -84,9 +92,11 @@ export interface PredictionResponse {
     intelligence?: PredictionSet[]; // Added for intelligence strategy
     yearly?: PredictionSet[]; // Added for yearly pattern strategy
     transfer?: PredictionSet[]; // Added for transfer pattern strategy
+    check_balance?: PredictionSet[]; // Added for check-and-balance strategy
     two_sure?: TwoSureThreeDirect; // Two Sure feature - 2 most likely numbers
     three_direct?: TwoSureThreeDirect; // Three Direct feature - 3 most likely numbers
   };
+  confidence?: Record<string, PredictionConfidence>; // Confidence scores per strategy (mapped from _confidence by backend)
   strategy: string;
   regime_change?: {
     detected: boolean;

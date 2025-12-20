@@ -1,107 +1,42 @@
-import React, { useState, useEffect } from 'react';
-import { analyticsApi, drawsApi } from '../api/client';
+import React, { useState } from 'react';
+import { drawsApi } from '../api/client';
 import { FrequencyChart } from '../components/FrequencyChart';
 import { CoOccurrenceMatrix } from '../components/CoOccurrenceMatrix';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorDisplay } from '../components/ErrorDisplay';
 import { handleApiError } from '../utils/errors';
+import { 
+  useFrequencyStats, 
+  useHotNumbers, 
+  useColdNumbers, 
+  useSleepingNumbers,
+  useCoOccurrence 
+} from '../hooks/useAnalytics';
 import type { FrequencyStats, CoOccurrenceData } from '../types';
 
 export const Analytics: React.FC = () => {
-  const [frequency30, setFrequency30] = useState<FrequencyStats[]>([]);
-  const [frequency365, setFrequency365] = useState<FrequencyStats[]>([]);
-  const [hotNumbers, setHotNumbers] = useState<FrequencyStats[]>([]);
-  const [coldNumbers, setColdNumbers] = useState<FrequencyStats[]>([]);
-  const [sleepingNumbers, setSleepingNumbers] = useState<number[]>([]);
-  const [coOccurrenceData, setCoOccurrenceData] = useState<CoOccurrenceData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<'30' | '365'>('30');
-  const [loadingCoOccurrence, setLoadingCoOccurrence] = useState(false);
 
-  useEffect(() => {
-    loadAnalytics();
-  }, []);
+  // React Query hooks
+  const { data: frequency30 = [], isLoading: loading30 } = useFrequencyStats(30);
+  const { data: frequency365 = [], isLoading: loading365 } = useFrequencyStats(365);
+  const { data: hotNumbers = [], isLoading: loadingHot } = useHotNumbers(30);
+  const { data: coldNumbers = [], isLoading: loadingCold } = useColdNumbers(30);
+  const { data: sleepingNumbers = [], isLoading: loadingSleeping } = useSleepingNumbers(30);
+  const { 
+    data: coOccurrenceData = [], 
+    isLoading: loadingCoOccurrence,
+    refetch: refetchCoOccurrence
+  } = useCoOccurrence({
+    limit: 50,
+    minCount: 2,
+    days: timeframe === '30' ? 30 : 365,
+  });
 
-  const loadAnalytics = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const [freq30, freq365, hot, cold, sleeping] = await Promise.all([
-        analyticsApi.getFrequency({ days: 30 }).catch((err) => {
-          console.error('Failed to load frequency (30 days):', err);
-          return [];
-        }),
-        analyticsApi.getFrequency({ days: 365 }).catch((err) => {
-          console.error('Failed to load frequency (365 days):', err);
-          return [];
-        }),
-        analyticsApi.getHot(30).catch((err) => {
-          console.error('Failed to load hot numbers:', err);
-          return [];
-        }),
-        analyticsApi.getCold(30).catch((err) => {
-          console.error('Failed to load cold numbers:', err);
-          return [];
-        }),
-        analyticsApi.getSleeping(30).catch((err) => {
-          console.error('Failed to load sleeping numbers:', err);
-          return [];
-        }),
-      ]);
-
-      setFrequency30(freq30);
-      setFrequency365(freq365);
-      setHotNumbers(hot);
-      setColdNumbers(cold);
-      setSleepingNumbers(sleeping);
-    } catch (err: any) {
-      const errorMessage = handleApiError(err);
-      // Check if it's a connection error
-      if (err?.message?.includes('Network Error') || err?.code === 'ERR_NETWORK' || err?.code === 'ECONNREFUSED') {
-        setError('Cannot connect to the server. Please make sure the backend is running on http://localhost:5000');
-      } else {
-        setError(errorMessage);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadCoOccurrence = async () => {
-    try {
-      setLoadingCoOccurrence(true);
-      const data = await analyticsApi.getCoOccurrence({
-        limit: 50,
-        minCount: 2,
-        days: timeframe === '30' ? 30 : 365,
-      });
-      setCoOccurrenceData(data);
-    } catch (err) {
-      console.error('Error loading co-occurrence:', err);
-      // Don't show error to user, just log it
-    } finally {
-      setLoadingCoOccurrence(false);
-    }
-  };
-
-  useEffect(() => {
-    loadCoOccurrence();
-  }, [timeframe]);
-
+  const loading = loading30 || loading365 || loadingHot || loadingCold || loadingSleeping;
+  
   if (loading) {
     return <LoadingSpinner message="Loading analytics..." fullScreen />;
-  }
-
-  if (error) {
-    return (
-      <ErrorDisplay
-        error={error}
-        onRetry={loadAnalytics}
-        title="Error loading analytics"
-      />
-    );
   }
 
   const currentFrequency = timeframe === '30' ? frequency30 : frequency365;
@@ -325,7 +260,7 @@ export const Analytics: React.FC = () => {
             <h2 className="text-2xl font-bold text-gray-800">Co-Occurrence Analysis</h2>
           </div>
           <button
-            onClick={loadCoOccurrence}
+            onClick={() => refetchCoOccurrence()}
             disabled={loadingCoOccurrence}
             className="px-4 py-2 text-sm font-medium bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-primary-300 transition-all flex items-center gap-2 disabled:opacity-50"
           >

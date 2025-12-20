@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { FrequencyStats } from '../types';
 
@@ -8,20 +8,22 @@ interface FrequencyChartProps {
   maxItems?: number;
 }
 
-export const FrequencyChart: React.FC<FrequencyChartProps> = ({
+const FrequencyChartComponent: React.FC<FrequencyChartProps> = ({
   data,
   title = 'Number Frequency',
   maxItems = 20,
 }) => {
-  const sortedData = [...data]
-    .sort((a, b) => b.totalCount - a.totalCount)
-    .slice(0, maxItems)
-    .map((item) => ({
-      number: item.number.toString(),
-      total: item.totalCount,
-      winning: item.winningCount,
-      machine: item.machineCount,
-    }));
+  const sortedData = useMemo(() => {
+    return [...data]
+      .sort((a, b) => b.totalCount - a.totalCount)
+      .slice(0, maxItems)
+      .map((item) => ({
+        number: item.number.toString(),
+        total: item.totalCount,
+        winning: item.winningCount,
+        machine: item.machineCount,
+      }));
+  }, [data, maxItems]);
 
   if (sortedData.length === 0) {
     return (
@@ -48,4 +50,14 @@ export const FrequencyChart: React.FC<FrequencyChartProps> = ({
     </div>
   );
 };
+
+// Memoize to prevent unnecessary re-renders
+export const FrequencyChart = React.memo(FrequencyChartComponent, (prevProps, nextProps) => {
+  // Only re-render if data, title, or maxItems change
+  return (
+    prevProps.title === nextProps.title &&
+    prevProps.maxItems === nextProps.maxItems &&
+    JSON.stringify(prevProps.data) === JSON.stringify(nextProps.data)
+  );
+});
 

@@ -800,5 +800,116 @@ router.post('/reset-and-recheck', requireAuth, requirePro, async (req, res, next
   }
 });
 
+/**
+ * POST /api/predictions/check-balance
+ * Generate check-and-balance prediction based on past winning predictions
+ * This analyzes which strategies have been most successful and uses the best one
+ */
+router.post('/check-balance', requireAuth, requirePro, async (req, res, next) => {
+  try {
+    const { limit, lottoType, useTypeSpecificTable } = req.query;
+    const userId = req.user!.id;
+
+    // Determine if we should use type-specific table
+    const useTypeTable = useTypeSpecificTable === 'true' && lottoType;
+
+    // Get historical draws
+    const draws = await drawService.getDraws({
+      lottoType: lottoType as string,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      useTypeSpecificTable: useTypeTable as boolean,
+    });
+
+    if (draws.length < 60) {
+      return res.status(400).json({
+        success: false,
+        error: 'Insufficient data',
+        message: `Need at least 60 draws for predictions. Found ${draws.length} draws.`,
+        minimum_required: 60,
+      });
+    }
+
+    // Generate check-and-balance prediction
+    let predictions;
+    try {
+      predictions = await predictionService.generateCheckAndBalancePrediction(
+        draws,
+        lottoType as string,
+        limit ? parseInt(limit as string, 10) : 100
+      );
+    } catch (error: any) {
+      // Handle case where no winning predictions exist
+      if (error.message === 'NO_WINNING_PREDICTIONS') {
+        return res.status(400).json({
+          success: false,
+          error: 'NO_WINNING_PREDICTIONS',
+          message: 'Check-and-balance requires past winning or partial predictions to analyze. Please try other prediction strategies or check back later once you have some successful predictions.',
+          code: 'NO_WINNING_PREDICTIONS',
+        });
+      }
+      // Re-throw other errors
+      throw error;
+    }
+
+    // Extract predicted numbers
+    let predictedNumbers: number[] = [];
+    if (predictions.predictions.check_balance) {
+      predictedNumbers = predictions.predictions.check_balance[0]?.numbers || [];
+    } else {
+      // Fallback: use first available prediction
+      const firstPredictionKey = Object.keys(predictions.predictions)[0];
+      predictedNumbers = predictions.predictions[firstPredictionKey as keyof typeof predictions.predictions]?.[0]?.numbers || [];
+    }
+
+    if (predictedNumbers.length === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'No prediction generated',
+        message: 'Check-and-balance prediction failed to generate valid numbers.',
+      });
+    }
+
+    // Auto-save to prediction history
+    try {
+      const result = await pool.query(
+        `INSERT INTO prediction_history (
+          user_id, strategy, prediction_data, lotto_type, 
+          predicted_numbers, target_draw_date
+         )
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, created_at`,
+        [
+          userId,
+          'check_balance',
+          JSON.stringify(predictions),
+          lottoType as string || null,
+          predictedNumbers,
+          new Date().toISOString().split('T')[0]
+        ]
+      );
+      logger.info(`Auto-saved check-and-balance prediction for user ${userId}, prediction ID: ${result.rows[0].id}`);
+    } catch (error: any) {
+      if (error.code !== '23505') {
+        logger.warn('Failed to auto-save check-and-balance prediction history', error);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...predictions,
+        recommendedStrategy: (predictions as any).recommendedStrategy || 'ensemble',
+        strategyConfidence: (predictions as any).strategyConfidence || 0,
+        winningPredictionsAnalyzed: (predictions as any).winningPredictionsAnalyzed || 0,
+      },
+      predictedNumbers,
+      strategy: 'check_balance',
+      message: 'Check-and-balance prediction generated successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;
 

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { drawsApi } from '../api/client';
 import { formatDate } from '../utils/format';
-import { DrawCard } from './DrawCard';
 import { LoadingSpinner } from './LoadingSpinner';
 import type { Draw, SearchResult } from '../types';
 

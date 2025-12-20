@@ -2,14 +2,23 @@ import axios from 'axios';
 import { logger } from '../utils/logger.ts';
 import { config } from '../config/index.ts';
 import type { Draw } from '../types/index.ts';
+import pool from '../database/db.ts';
 
 interface PredictionRequest {
   draws: number[][];
   machine_draws?: number[][]; // Machine numbers for intelligence engine
   draw_dates?: string[]; // Draw dates for yearly and transfer pattern analysis
   lotto_types?: string[]; // Lotto types for yearly and transfer pattern analysis (matches draw_dates)
-  strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence' | 'yearly' | 'transfer';
+  strategy: 'ensemble' | 'ml' | 'genetic' | 'pattern' | 'intelligence' | 'yearly' | 'transfer' | 'check_balance';
   n_predictions?: number;
+  winning_predictions?: Array<{
+    strategy: string;
+    matches: number;
+    predicted_numbers: number[];
+    lotto_type: string;
+    created_at: string;
+  }>;
+  current_lotto_type?: string;
 }
 
 // Special prediction types for "two sure" and "three direct" features
@@ -497,6 +506,172 @@ export class PredictionService {
       }
 
       throw error instanceof Error ? error : new Error('Unknown analysis error');
+    }
+  }
+
+  /**
+   * Generate check-and-balance prediction based on past winning predictions
+   * Analyzes which strategies have been most successful and uses the best one
+   */
+  async generateCheckAndBalancePrediction(
+    draws: Draw[],
+    lottoType?: string,
+    limit: number = 100
+  ): Promise<PredictionResponse> {
+    try {
+      logger.info('Generating check-and-balance prediction...');
+
+      // Query winning predictions from database (matches >= 1)
+      const winningPredictionsQuery = `
+        SELECT 
+          strategy,
+          matches,
+          predicted_numbers,
+          lotto_type,
+          created_at
+        FROM prediction_history
+        WHERE matches >= 1
+          AND is_checked = TRUE
+          ${lottoType ? `AND lotto_type = $1` : ''}
+        ORDER BY created_at DESC
+        LIMIT $${lottoType ? 2 : 1}
+      `;
+
+      const queryParams = lottoType ? [lottoType, limit] : [limit];
+      const result = await pool.query(winningPredictionsQuery, queryParams);
+      
+      const winningPredictions = result.rows.map(row => ({
+        strategy: row.strategy,
+        matches: row.matches,
+        predicted_numbers: row.predicted_numbers,
+        lotto_type: row.lotto_type,
+        created_at: row.created_at
+      }));
+
+      logger.info(`Found ${winningPredictions.length} winning predictions to analyze`);
+
+      // If no winning predictions, return error - no fallback
+      if (winningPredictions.length === 0) {
+        logger.info('No winning predictions found - check-and-balance requires past wins/partials');
+        throw new Error('NO_WINNING_PREDICTIONS');
+      }
+
+      // Analyze strategy performance locally to get recommended strategy
+      let recommendedStrategy = 'ensemble';
+      let strategyConfidence = 0;
+      
+      // Calculate strategy performance
+      const strategyStats: Record<string, { wins: number; total: number; avgMatches: number }> = {};
+      
+      for (const pred of winningPredictions) {
+        const strat = pred.strategy || 'unknown';
+        if (!strategyStats[strat]) {
+          strategyStats[strat] = { wins: 0, total: 0, avgMatches: 0 };
+        }
+        strategyStats[strat].wins += 1;
+        strategyStats[strat].total += 1;
+        strategyStats[strat].avgMatches += pred.matches || 0;
+      }
+      
+      // Calculate scores
+      const strategyScores: Record<string, number> = {};
+      for (const [strat, stats] of Object.entries(strategyStats)) {
+        const winRate = stats.wins / stats.total;
+        const avgMatches = stats.avgMatches / stats.wins;
+        strategyScores[strat] = winRate * 0.6 + (avgMatches / 5) * 0.4;
+      }
+      
+      // Find best strategy
+      const sorted = Object.entries(strategyScores).sort((a, b) => b[1] - a[1]);
+      if (sorted.length > 0) {
+        recommendedStrategy = sorted[0][0];
+        strategyConfidence = sorted[0][1];
+        if (sorted.length > 1) {
+          strategyConfidence = sorted[0][1] - sorted[1][1]; // Difference from second best
+        }
+      }
+      
+      logger.info(`Recommended strategy: ${recommendedStrategy} (confidence: ${strategyConfidence.toFixed(2)})`);
+
+      // Convert to Python format
+      const converted = this.convertDrawsToPythonFormat(draws);
+      let winning = converted.winning;
+      let machine = converted.machine;
+      let lotto_types = converted.lotto_types || [];
+
+      // Validate draws
+      const validWinning: number[][] = [];
+      const validMachine: number[][] = [];
+      const validLottoTypes: string[] = [];
+
+      for (let i = 0; i < winning.length; i++) {
+        const winDraw = winning[i];
+        if (winDraw && Array.isArray(winDraw) && winDraw.length === 5) {
+          if (winDraw.every(n => typeof n === 'number' && n >= 1 && n <= 90)) {
+            validWinning.push(winDraw);
+            const machDraw = (i < machine.length && machine[i] !== undefined) ? machine[i] : undefined;
+            if (machDraw && Array.isArray(machDraw) && machDraw.length === 5 && 
+                machDraw.every(n => typeof n === 'number' && n >= 0 && n <= 90)) {
+              validMachine.push(machDraw);
+            } else {
+              validMachine.push([0, 0, 0, 0, 0]);
+            }
+            validLottoTypes.push(lotto_types[i] || '');
+          }
+        }
+      }
+
+      winning = validWinning;
+      machine = validMachine;
+      lotto_types = validLottoTypes;
+
+      if (winning.length === 0) {
+        throw new Error('No valid draws after validation');
+      }
+
+      // Extract draw dates and lotto types
+      const drawDates: string[] = [];
+      let drawIndex = 0;
+      for (const draw of draws) {
+        if (draw.winningNumbers && Array.isArray(draw.winningNumbers) && draw.winningNumbers.length === 5) {
+          if (drawIndex < winning.length) {
+            const date = draw.drawDate instanceof Date 
+              ? draw.drawDate.toISOString().split('T')[0]
+              : String(draw.drawDate).split('T')[0];
+            drawDates.push(date);
+            drawIndex++;
+          }
+        }
+      }
+
+      // Generate prediction using recommended strategy
+      logger.info(`Generating check-and-balance prediction using recommended strategy: ${recommendedStrategy}`);
+      const predictions = await this.generatePredictions(draws, recommendedStrategy as any, 1);
+      
+      // Rename the prediction to check_balance
+      if (recommendedStrategy in predictions.predictions) {
+        predictions.predictions.check_balance = predictions.predictions[recommendedStrategy as keyof typeof predictions.predictions];
+        delete predictions.predictions[recommendedStrategy as keyof typeof predictions.predictions];
+      }
+      
+      // Add metadata about the recommended strategy
+      (predictions as any).recommendedStrategy = recommendedStrategy;
+      (predictions as any).strategyConfidence = strategyConfidence;
+      (predictions as any).winningPredictionsAnalyzed = winningPredictions.length;
+
+      logger.info('Check-and-balance prediction generated successfully');
+      return predictions;
+
+    } catch (error: any) {
+      logger.error(`Check-and-balance prediction failed: ${error.message}`);
+      
+      // If no winning predictions, re-throw the error (no fallback)
+      if (error.message === 'NO_WINNING_PREDICTIONS') {
+        throw error;
+      }
+      
+      // For other errors, still throw (no fallback)
+      throw error;
     }
   }
 }

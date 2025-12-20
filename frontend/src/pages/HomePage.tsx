@@ -6,7 +6,6 @@ import { DrawModal } from '../components/DrawModal';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorDisplay } from '../components/ErrorDisplay';
 import { handleApiError } from '../utils/errors';
-import { formatDate } from '../utils/format';
 import type { Draw, SearchResult, FrequencyStats } from '../types';
 
 // Utility: normalize input like "3,12,19" -> [3,12,19]
@@ -108,7 +107,7 @@ export const HomePage: React.FC = () => {
               exact,
             } as SearchResult;
           })
-          .filter((d) => (matchMode === 'exact' ? d.exact : d.matchCount > 0))
+          .filter((d) => (matchMode === 'exact' ? d.exact : d.matchCount && d.matchCount > 0))
           .sort((a, b) => (b.matchCount || 0) - (a.matchCount || 0));
         setSearchResults(clientResults);
       } finally {
@@ -133,7 +132,7 @@ export const HomePage: React.FC = () => {
               matchCount === allNumbers.length && parsedQuery.length === allNumbers.length;
             return { ...d, matchCount, exact } as SearchResult;
           })
-          .filter((d) => (matchMode === 'exact' ? d.exact : d.matchCount > 0))
+          .filter((d) => (matchMode === 'exact' ? d.exact : d.matchCount && d.matchCount > 0))
           .sort((a, b) => (b.matchCount || 0) - (a.matchCount || 0));
   }, [parsedQuery, draws, matchMode, searchResults]);
 
@@ -180,6 +179,31 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {/* Most Recent Draw */}
+      {latestDraw && (
+        <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">Most Recent Draw</h2>
+              <p className="text-sm text-gray-600">Latest lottery results</p>
+            </div>
+          </div>
+          <div className="flex justify-center">
+            <div className="w-full max-w-md">
+              <DrawCard
+                draw={latestDraw}
+                onClick={() => setSelectedDraw(latestDraw)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Search Section */}
       <div className="card border-2 border-gray-100">
@@ -308,31 +332,6 @@ export const HomePage: React.FC = () => {
           </>
         )}
       </div>
-
-      {/* Most Recent Draw */}
-      {latestDraw && (
-        <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-gray-800">Most Recent Draw</h2>
-              <p className="text-sm text-gray-600">Latest lottery results</p>
-            </div>
-          </div>
-          <div className="flex justify-center">
-            <div className="w-full max-w-md">
-              <DrawCard
-                draw={latestDraw}
-                onClick={() => setSelectedDraw(latestDraw)}
-              />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Frequency Analytics */}
       <div className="card border-2 border-gray-100">

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { ErrorDisplay } from '../components/ErrorDisplay';
 
 export const Register: React.FC = () => {
   const [formData, setFormData] = useState({

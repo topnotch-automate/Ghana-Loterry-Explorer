@@ -1,7 +1,8 @@
 import axios, { AxiosError } from 'axios';
+import axiosRetry from 'axios-retry';
 import type { ApiResponse, Draw, SearchResult, FrequencyStats, CoOccurrenceData, PredictionResponse, SubscriptionStatus, PredictionStrategy, SavedPrediction, StrategyPerformance } from '../types';
 import { API_CONFIG } from '../utils/constants';
-import { ApiError, handleApiError } from '../utils/errors';
+import { ApiError } from '../utils/errors';
 
 const api = axios.create({
   baseURL: API_CONFIG.BASE_URL + '/api',
@@ -9,6 +10,33 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: API_CONFIG.TIMEOUT,
+  // Support request cancellation
+  signal: undefined, // Will be set per request
+});
+
+// Configure retry logic with exponential backoff
+axiosRetry(api, {
+  retries: 3,
+  retryDelay: (retryCount) => {
+    // Exponential backoff: 1s, 2s, 4s (max 30s)
+    const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000);
+    // Add jitter (random 0-30% of delay) to prevent thundering herd
+    const jitter = Math.random() * 0.3 * delay;
+    return delay + jitter;
+  },
+  retryCondition: (error) => {
+    // Retry on network errors or 5xx server errors
+    if (!error.response) {
+      // Network error (no response) - retry
+      return true;
+    }
+    const status = error.response.status;
+    // Retry on 5xx server errors, but not on 4xx client errors
+    return status >= 500 && status < 600;
+  },
+  onRetry: (retryCount, error) => {
+    console.log(`Retrying request (attempt ${retryCount}/3):`, error.message);
+  },
 });
 
 // Add JWT token from localStorage to Authorization header
@@ -23,7 +51,7 @@ api.interceptors.request.use((config) => {
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError<ApiResponse>) => {
+  (error: AxiosError<ApiResponse<any>>) => {
     // Handle timeout errors specifically
     if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       const timeoutError = new ApiError(
@@ -57,12 +85,11 @@ api.interceptors.response.use(
     
     // Handle other errors
     if (error.response?.data) {
-      const { error: errorMessage, code, details } = error.response.data;
+      const responseData = error.response.data as ApiResponse<any>;
+      const errorMessage = responseData.error || responseData.message || 'An error occurred';
       throw new ApiError(
-        errorMessage || 'An error occurred',
-        error.response.status,
-        code,
-        details
+        errorMessage,
+        error.response.status
       );
     }
     throw new ApiError(
@@ -351,6 +378,28 @@ export const predictionsApi = {
     });
     if (!response.data.success || !response.data.data) {
       throw new ApiError(response.data.error || 'Failed to generate predictions');
+    }
+    return response.data.data;
+  },
+
+  generateCheckBalance: async (params?: {
+    limit?: number;
+    lottoType?: string;
+    useTypeSpecificTable?: boolean;
+  }): Promise<PredictionResponse> => {
+    const searchParams: Record<string, string> = {};
+    if (params?.limit) searchParams.limit = params.limit.toString();
+    if (params?.lottoType) searchParams.lottoType = params.lottoType;
+    if (params?.useTypeSpecificTable !== undefined) {
+      searchParams.useTypeSpecificTable = params.useTypeSpecificTable.toString();
+    }
+
+    const response = await api.post<ApiResponse<PredictionResponse>>('/predictions/check-balance', {}, {
+      params: searchParams,
+      timeout: 300000, // 5 minutes - same as regular predictions
+    });
+    if (!response.data.success || !response.data.data) {
+      throw new ApiError(response.data.error || 'Failed to generate check-and-balance prediction');
     }
     return response.data.data;
   },

@@ -1049,6 +1049,27 @@ class MLYearlyPredictor:
         self.feature_scaler = StandardScaler()
         self.trained = False
         self.feature_importance = {}
+        # Define fixed feature order to ensure consistency
+        self.feature_names = [
+            # Date features (9)
+            'day_of_month', 'day_of_week', 'week_of_month', 'month', 'day_of_year',
+            'day_sin', 'day_cos', 'month_sin', 'month_cos',
+            # Lotto type (1)
+            'lotto_type_hash',
+            # Temporal features (27)
+            'same_date_type_freq_0', 'same_date_type_freq_1', 'same_date_type_freq_2',
+            'same_date_type_freq_3', 'same_date_type_freq_4', 'same_date_type_freq_5',
+            'same_date_type_freq_6', 'same_date_type_freq_7', 'same_date_type_freq_8',
+            'same_date_type_freq_9',
+            'same_date_type_avg_sum', 'same_date_type_std_sum', 'same_date_type_count',
+            'same_date_diff_type_freq_0', 'same_date_diff_type_freq_1', 'same_date_diff_type_freq_2',
+            'same_date_diff_type_freq_3', 'same_date_diff_type_freq_4',
+            'same_date_diff_type_avg_sum',
+            'week_type_freq_0', 'week_type_freq_1', 'week_type_freq_2', 'week_type_freq_3', 'week_type_freq_4',
+            'week_diff_type_freq_0', 'week_diff_type_freq_1', 'week_diff_type_freq_2',
+            # Number features (2)
+            'number', 'number_freq'
+        ]  # Total: 9 + 1 + 27 + 2 = 39 features
         
     def extract_date_features(self, draw_date: str) -> Dict[str, float]:
         """
@@ -1105,6 +1126,8 @@ class MLYearlyPredictor:
         Extract features based on temporal patterns from previous years.
         Prioritizes same-date same-lotto-type matches, but also considers same-date different-lotto-type.
         
+        Returns a FIXED set of features to ensure consistency (34 features total).
+        
         Args:
             draws_by_date: Dict mapping date_str -> (draw, lotto_type)
             target_date: Date to predict for
@@ -1112,7 +1135,28 @@ class MLYearlyPredictor:
         """
         from datetime import datetime
         
+        # Initialize with fixed feature structure (34 features)
         features = {}
+        
+        # Same-date same-type features (13 features)
+        for i in range(10):
+            features[f'same_date_type_freq_{i}'] = 0.0
+        features['same_date_type_avg_sum'] = 225.0
+        features['same_date_type_std_sum'] = 0.0
+        features['same_date_type_count'] = 0.0
+        
+        # Same-date diff-type features (6 features)
+        for i in range(5):
+            features[f'same_date_diff_type_freq_{i}'] = 0.0
+        features['same_date_diff_type_avg_sum'] = 0.0
+        
+        # Week same-type features (5 features)
+        for i in range(5):
+            features[f'week_type_freq_{i}'] = 0.0
+        
+        # Week diff-type features (3 features)
+        for i in range(3):
+            features[f'week_diff_type_freq_{i}'] = 0.0
         
         try:
             if isinstance(target_date, str):
@@ -1135,6 +1179,12 @@ class MLYearlyPredictor:
                             draw = draw_data
                             lotto_type = None
                         
+                        # Ensure draw is a list of integers
+                        if not isinstance(draw, list):
+                            continue
+                        if not all(isinstance(n, (int, np.integer)) for n in draw):
+                            continue
+                        
                         if target_lotto_type and lotto_type == target_lotto_type:
                             same_date_same_type_draws.append(draw)
                         else:
@@ -1144,43 +1194,34 @@ class MLYearlyPredictor:
             
             # Features from same-date same-lotto-type draws (HIGHER PRIORITY)
             if same_date_same_type_draws:
-                all_numbers = [num for draw in same_date_same_type_draws for num in draw]
+                all_numbers = [num for draw in same_date_same_type_draws for num in draw if isinstance(num, (int, np.integer))]
                 freq = Counter(all_numbers)
                 
-                # Most common numbers on this date+type across years
+                # Most common numbers on this date+type across years (up to 10)
                 top_numbers = [n for n, _ in freq.most_common(10)]
-                for i, num in enumerate(top_numbers):
-                    features[f'same_date_type_freq_{i}'] = freq[num] / len(same_date_same_type_draws)
+                for i in range(min(10, len(top_numbers))):
+                    features[f'same_date_type_freq_{i}'] = float(freq[top_numbers[i]] / len(same_date_same_type_draws))
                 
                 # Average sum on this date+type
-                sums = [sum(draw) for draw in same_date_same_type_draws]
-                features['same_date_type_avg_sum'] = np.mean(sums) if sums else 225
-                features['same_date_type_std_sum'] = np.std(sums) if len(sums) > 1 else 0
-                features['same_date_type_count'] = len(same_date_same_type_draws)
-            else:
-                # Default values if no same-date same-type history
-                for i in range(10):
-                    features[f'same_date_type_freq_{i}'] = 0
-                features['same_date_type_avg_sum'] = 225
-                features['same_date_type_std_sum'] = 0
-                features['same_date_type_count'] = 0
+                sums = [float(sum(draw)) for draw in same_date_same_type_draws if all(isinstance(n, (int, np.integer)) for n in draw)]
+                if sums:
+                    features['same_date_type_avg_sum'] = float(np.mean(sums))
+                    features['same_date_type_std_sum'] = float(np.std(sums)) if len(sums) > 1 else 0.0
+                features['same_date_type_count'] = float(len(same_date_same_type_draws))
             
             # Features from same-date different-lotto-type draws (LOWER PRIORITY, weighted 0.3)
             if same_date_diff_type_draws:
-                all_numbers = [num for draw in same_date_diff_type_draws for num in draw]
+                all_numbers = [num for draw in same_date_diff_type_draws for num in draw if isinstance(num, (int, np.integer))]
                 freq = Counter(all_numbers)
                 
                 top_numbers = [n for n, _ in freq.most_common(5)]
-                for i, num in enumerate(top_numbers):
+                for i in range(min(5, len(top_numbers))):
                     # Weighted lower (0.3x) since different lotto type
-                    features[f'same_date_diff_type_freq_{i}'] = (freq[num] / len(same_date_diff_type_draws)) * 0.3
+                    features[f'same_date_diff_type_freq_{i}'] = float((freq[top_numbers[i]] / len(same_date_diff_type_draws)) * 0.3)
                 
-                sums = [sum(draw) for draw in same_date_diff_type_draws]
-                features['same_date_diff_type_avg_sum'] = np.mean(sums) * 0.3 if sums else 225 * 0.3
-            else:
-                for i in range(5):
-                    features[f'same_date_diff_type_freq_{i}'] = 0
-                features['same_date_diff_type_avg_sum'] = 0
+                sums = [float(sum(draw)) for draw in same_date_diff_type_draws if all(isinstance(n, (int, np.integer)) for n in draw)]
+                if sums:
+                    features['same_date_diff_type_avg_sum'] = float(np.mean(sums) * 0.3)
             
             # Look for draws in same week of month across years (same lotto type preferred)
             week_same_type_draws = []
@@ -1198,6 +1239,10 @@ class MLYearlyPredictor:
                             draw = draw_data
                             lotto_type = None
                         
+                        # Ensure draw is valid
+                        if not isinstance(draw, list) or not all(isinstance(n, (int, np.integer)) for n in draw):
+                            continue
+                        
                         if target_lotto_type and lotto_type == target_lotto_type:
                             week_same_type_draws.append(draw)
                         else:
@@ -1206,41 +1251,33 @@ class MLYearlyPredictor:
                     continue
             
             if week_same_type_draws:
-                all_numbers = [num for draw in week_same_type_draws for num in draw]
+                all_numbers = [num for draw in week_same_type_draws for num in draw if isinstance(num, (int, np.integer))]
                 freq = Counter(all_numbers)
                 top_numbers = [n for n, _ in freq.most_common(5)]
-                for i, num in enumerate(top_numbers):
-                    features[f'week_type_freq_{i}'] = freq[num] / len(week_same_type_draws)
-            else:
-                for i in range(5):
-                    features[f'week_type_freq_{i}'] = 0
+                for i in range(min(5, len(top_numbers))):
+                    features[f'week_type_freq_{i}'] = float(freq[top_numbers[i]] / len(week_same_type_draws))
             
             if week_diff_type_draws:
-                all_numbers = [num for draw in week_diff_type_draws for num in draw]
+                all_numbers = [num for draw in week_diff_type_draws for num in draw if isinstance(num, (int, np.integer))]
                 freq = Counter(all_numbers)
                 top_numbers = [n for n, _ in freq.most_common(3)]
-                for i, num in enumerate(top_numbers):
-                    features[f'week_diff_type_freq_{i}'] = (freq[num] / len(week_diff_type_draws)) * 0.3
-            else:
-                for i in range(3):
-                    features[f'week_diff_type_freq_{i}'] = 0
+                for i in range(min(3, len(top_numbers))):
+                    features[f'week_diff_type_freq_{i}'] = float((freq[top_numbers[i]] / len(week_diff_type_draws)) * 0.3)
+            
+            # Ensure all values are scalars (convert any arrays/lists to floats)
+            for key in features:
+                val = features[key]
+                if isinstance(val, (list, np.ndarray)):
+                    features[key] = float(val[0]) if len(val) > 0 else 0.0
+                elif isinstance(val, (int, np.integer)):
+                    features[key] = float(val)
+                elif not isinstance(val, (float, np.floating)):
+                    features[key] = 0.0
             
             return features
         except Exception as e:
-            # Return default features on error
-            features = {}
-            for i in range(10):
-                features[f'same_date_type_freq_{i}'] = 0
-            features['same_date_type_avg_sum'] = 225
-            features['same_date_type_std_sum'] = 0
-            features['same_date_type_count'] = 0
-            for i in range(5):
-                features[f'same_date_diff_type_freq_{i}'] = 0
-            features['same_date_diff_type_avg_sum'] = 0
-            for i in range(5):
-                features[f'week_type_freq_{i}'] = 0
-            for i in range(3):
-                features[f'week_diff_type_freq_{i}'] = 0
+            print(f"Warning: extract_temporal_pattern_features failed: {e}")
+            # Return default features (already initialized above)
             return features
     
     def extract_number_features(self, historical_draws: List[List[int]], 
@@ -1331,7 +1368,7 @@ class MLYearlyPredictor:
                 else:
                     date_features['lotto_type_hash'] = 0
                 
-                # Combine features
+                # Combine features in fixed order
                 combined_features = {**date_features, **temporal_features}
                 
                 # For each number in the draw, create a training sample
@@ -1342,27 +1379,64 @@ class MLYearlyPredictor:
                     
                     # Add number-specific features
                     num_features = combined_features.copy()
-                    num_features['number'] = num
+                    num_features['number'] = float(num)  # Ensure scalar
                     # Calculate frequency across all draws (weighted by lotto type match)
-                    number_freq = 0
-                    total_weight = 0
-                    for d, (d_draw, d_type) in all_draws_by_date.items():
+                    number_freq = 0.0
+                    total_weight = 0.0
+                    for d, draw_data in all_draws_by_date.items():
+                        if isinstance(draw_data, tuple):
+                            d_draw, d_type = draw_data
+                        else:
+                            d_draw = draw_data
+                            d_type = None
+                        
                         weight = 1.0 if d_type == lotto_type else 0.3
-                        if num in d_draw:
+                        if isinstance(d_draw, list) and num in d_draw:
                             number_freq += weight
                         total_weight += weight
-                    num_features['number_freq'] = number_freq / total_weight if total_weight > 0 else 0
+                    num_features['number_freq'] = float(number_freq / total_weight if total_weight > 0 else 0.0)
                     
-                    X_samples.append(list(num_features.values()))
-                    y_samples.append(target)
+                    # Build feature vector in fixed order, ensuring all values are scalars
+                    feature_vector = []
+                    for feature_name in self.feature_names:
+                        if feature_name in num_features:
+                            val = num_features[feature_name]
+                            # Ensure scalar value
+                            if isinstance(val, (list, np.ndarray, tuple)):
+                                feature_vector.append(float(val[0]) if len(val) > 0 else 0.0)
+                            elif isinstance(val, (int, np.integer)):
+                                feature_vector.append(float(val))
+                            elif isinstance(val, (float, np.floating)):
+                                feature_vector.append(float(val))
+                            else:
+                                feature_vector.append(0.0)
+                        else:
+                            feature_vector.append(0.0)
+                    
+                    # Validate feature vector length
+                    if len(feature_vector) == len(self.feature_names):
+                        X_samples.append(feature_vector)
+                        y_samples.append(target)
         
         if not X_samples:
             return np.array([]), np.array([])
         
-        X = np.array(X_samples)
-        y = np.array(y_samples)
-        
-        return X, y
+        # Convert to numpy array, ensuring all values are numeric scalars
+        try:
+            X = np.array(X_samples, dtype=np.float64)
+            y = np.array(y_samples, dtype=np.int32)
+            
+            # Validate shape consistency
+            if len(X) == 0 or X.shape[1] != len(self.feature_names):
+                print(f"Warning: Feature shape mismatch. Expected {len(self.feature_names)} features, got {X.shape[1] if len(X) > 0 else 0}")
+                return np.array([]), np.array([])
+            
+            return X, y
+        except (ValueError, TypeError) as e:
+            print(f"Error converting features to array: {e}")
+            import traceback
+            traceback.print_exc()
+            return np.array([]), np.array([])
     
     def train(self, yearly_draws: Dict[int, List[Tuple[str, List[int], str]]]) -> bool:
         """
@@ -1378,11 +1452,24 @@ class MLYearlyPredictor:
                 print("Insufficient data for ML training (need at least 100 samples)")
                 return False
             
+            # Validate feature count matches expected
+            expected_features = len(self.feature_names)
+            if X.shape[1] != expected_features:
+                print(f"Warning: Feature count mismatch. Expected {expected_features}, got {X.shape[1]}. Adjusting...")
+                # Pad or truncate features to match expected count
+                if X.shape[1] < expected_features:
+                    # Pad with zeros
+                    padding = np.zeros((X.shape[0], expected_features - X.shape[1]))
+                    X = np.hstack([X, padding])
+                elif X.shape[1] > expected_features:
+                    # Truncate to expected count
+                    X = X[:, :expected_features]
+            
             # Scale features
             X_scaled = self.feature_scaler.fit_transform(X)
             
             # Train ensemble of models for better accuracy
-            print(f"  Training on {len(X)} samples with {X.shape[1]} features...")
+            print(f"  Training on {len(X)} samples with {X.shape[1]} features (expected {expected_features})...")
             
             # Model 1: RandomForest (good for non-linear patterns and feature importance)
             self.models['rf'] = RandomForestClassifier(
@@ -1427,23 +1514,15 @@ class MLYearlyPredictor:
             self.models['number_classifier'] = EnsembleClassifier(self.models['rf'], self.models['gb'])
             
             # Get feature importance from RandomForest (most interpretable)
-            feature_names = ['day_of_month', 'day_of_week', 'week_of_month', 'month', 
-                           'day_of_year', 'day_sin', 'day_cos', 'month_sin', 'month_cos',
-                           'lotto_type_hash',
-                           'same_date_type_freq_0', 'same_date_type_freq_1', 'same_date_type_freq_2',
-                           'same_date_type_avg_sum', 'same_date_type_std_sum', 'same_date_type_count',
-                           'same_date_diff_type_freq_0', 'same_date_diff_type_freq_1',
-                           'same_date_diff_type_avg_sum',
-                           'week_type_freq_0', 'week_type_freq_1',
-                           'week_diff_type_freq_0',
-                           'number', 'number_freq']
-            
+            # Use the fixed feature names
             importances = self.models['rf'].feature_importances_
-            # Pad feature names if needed
-            while len(feature_names) < len(importances):
-                feature_names.append(f'feature_{len(feature_names)}')
             
-            self.feature_importance = dict(zip(feature_names[:len(importances)], importances))
+            # Ensure feature names match importances length
+            feature_names_for_importance = self.feature_names[:len(importances)]
+            if len(feature_names_for_importance) < len(importances):
+                feature_names_for_importance.extend([f'feature_{i}' for i in range(len(feature_names_for_importance), len(importances))])
+            
+            self.feature_importance = dict(zip(feature_names_for_importance, importances))
             
             print(f"✅ Ensemble ML models trained on {len(X)} samples")
             top_features = sorted(self.feature_importance.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -1526,9 +1605,45 @@ class MLYearlyPredictor:
                 
                 combined_features['number_freq'] = number_freq / total_weight if total_weight > 0 else 0
                 
-                # Prepare feature vector (must match training feature order)
-                feature_vector = np.array([list(combined_features.values())])
-                feature_vector_scaled = self.feature_scaler.transform(feature_vector)
+                # Prepare feature vector in fixed order (must match training feature order)
+                feature_vector = []
+                for feature_name in self.feature_names:
+                    if feature_name in combined_features:
+                        val = combined_features[feature_name]
+                        # Ensure scalar value
+                        if isinstance(val, (list, np.ndarray, tuple)):
+                            feature_vector.append(float(val[0]) if len(val) > 0 else 0.0)
+                        elif isinstance(val, (int, np.integer)):
+                            feature_vector.append(float(val))
+                        elif isinstance(val, (float, np.floating)):
+                            feature_vector.append(float(val))
+                        else:
+                            feature_vector.append(0.0)
+                    else:
+                        feature_vector.append(0.0)
+                
+                # Ensure correct shape
+                if len(feature_vector) != len(self.feature_names):
+                    print(f"Warning: Feature vector length mismatch. Expected {len(self.feature_names)}, got {len(feature_vector)}")
+                    # Pad or truncate
+                    if len(feature_vector) < len(self.feature_names):
+                        feature_vector.extend([0.0] * (len(self.feature_names) - len(feature_vector)))
+                    else:
+                        feature_vector = feature_vector[:len(self.feature_names)]
+                
+                feature_vector_array = np.array([feature_vector], dtype=np.float64)
+                
+                # Validate feature count matches scaler expectation
+                if feature_vector_array.shape[1] != self.feature_scaler.n_features_in_:
+                    print(f"Warning: Feature count mismatch during prediction. Scaler expects {self.feature_scaler.n_features_in_}, got {feature_vector_array.shape[1]}")
+                    # Adjust to match scaler
+                    if feature_vector_array.shape[1] < self.feature_scaler.n_features_in_:
+                        padding = np.zeros((1, self.feature_scaler.n_features_in_ - feature_vector_array.shape[1]))
+                        feature_vector_array = np.hstack([feature_vector_array, padding])
+                    elif feature_vector_array.shape[1] > self.feature_scaler.n_features_in_:
+                        feature_vector_array = feature_vector_array[:, :self.feature_scaler.n_features_in_]
+                
+                feature_vector_scaled = self.feature_scaler.transform(feature_vector_array)
                 
                 # Predict probability this number appears
                 prob = self.models['number_classifier'].predict_proba(feature_vector_scaled)[0][1]
@@ -1554,6 +1669,191 @@ class MLYearlyPredictor:
                 for num in draw:
                     freq[num] += weight
             return sorted([n for n, _ in freq.most_common(5)])
+
+
+# ============================================================================
+# CHECK AND BALANCE ANALYZER - Meta-Learning from Winning Predictions
+# ============================================================================
+
+class CheckAndBalanceAnalyzer:
+    """
+    Analyzes past winning/partial predictions to identify which strategies
+    are most successful, then recommends the best strategy for current predictions.
+    
+    This is a meta-learning approach that learns from successful predictions.
+    """
+    
+    def __init__(self):
+        self.strategy_performance = {}  # Track strategy success rates
+        self.recent_wins = []  # Track recent winning predictions
+        
+    def analyze_strategy_performance(self, winning_predictions: List[Dict]) -> Dict:
+        """
+        Analyze which strategies generated winning predictions.
+        
+        Args:
+            winning_predictions: List of dicts with keys:
+                - strategy: str (strategy name)
+                - matches: int (1 for partial, 2+ for win)
+                - predicted_numbers: List[int]
+                - lotto_type: str
+                - created_at: str (timestamp)
+        
+        Returns:
+            Dict with strategy recommendations and performance metrics
+        """
+        if not winning_predictions:
+            return {
+                'recommended_strategy': 'ensemble',  # Default fallback
+                'confidence': 0.0,
+                'strategy_performance': {},
+                'total_analyzed': 0
+            }
+        
+        print(f"Analyzing {len(winning_predictions)} winning predictions...")
+        
+        # Group by strategy
+        strategy_stats = {}
+        
+        for pred in winning_predictions:
+            strategy = pred.get('strategy', 'unknown')
+            matches = pred.get('matches', 0)
+            lotto_type = pred.get('lotto_type', '')
+            created_at = pred.get('created_at', '')
+            
+            if strategy not in strategy_stats:
+                strategy_stats[strategy] = {
+                    'total_wins': 0,
+                    'partial_wins': 0,  # 1 match
+                    'full_wins': 0,  # 2+ matches
+                    'total_predictions': 0,
+                    'recent_wins': [],  # Last 10 wins
+                    'lotto_types': Counter(),
+                    'avg_matches': 0.0
+                }
+            
+            stats = strategy_stats[strategy]
+            stats['total_predictions'] += 1
+            
+            if matches >= 2:
+                stats['full_wins'] += 1
+                stats['total_wins'] += 1
+            elif matches == 1:
+                stats['partial_wins'] += 1
+                stats['total_wins'] += 1
+            
+            # Track recent wins (last 10)
+            if matches >= 1:
+                stats['recent_wins'].append({
+                    'matches': matches,
+                    'lotto_type': lotto_type,
+                    'created_at': created_at
+                })
+                if len(stats['recent_wins']) > 10:
+                    stats['recent_wins'].pop(0)
+            
+            if lotto_type:
+                stats['lotto_types'][lotto_type] += 1
+        
+        # Calculate performance metrics
+        strategy_scores = {}
+        
+        for strategy, stats in strategy_stats.items():
+            if stats['total_predictions'] == 0:
+                continue
+            
+            # Win rate (percentage of predictions that resulted in at least 1 match)
+            win_rate = stats['total_wins'] / stats['total_predictions']
+            
+            # Full win rate (2+ matches)
+            full_win_rate = stats['full_wins'] / stats['total_predictions']
+            
+            # Average matches per prediction
+            total_matches = sum(w['matches'] for w in stats['recent_wins'])
+            avg_matches = total_matches / len(stats['recent_wins']) if stats['recent_wins'] else 0
+            
+            # Recency bonus (more recent wins = higher score)
+            recency_bonus = min(len(stats['recent_wins']) / 10.0, 1.0)
+            
+            # Calculate composite score
+            # Weight: 40% win rate, 30% full win rate, 20% avg matches, 10% recency
+            composite_score = (
+                win_rate * 0.4 +
+                full_win_rate * 0.3 +
+                (avg_matches / 5.0) * 0.2 +  # Normalize to 0-1 (max 5 matches)
+                recency_bonus * 0.1
+            )
+            
+            strategy_scores[strategy] = {
+                'score': composite_score,
+                'win_rate': win_rate,
+                'full_win_rate': full_win_rate,
+                'avg_matches': avg_matches,
+                'total_predictions': stats['total_predictions'],
+                'total_wins': stats['total_wins'],
+                'recent_wins_count': len(stats['recent_wins'])
+            }
+            
+            stats['avg_matches'] = avg_matches
+        
+        # Find best strategy
+        if not strategy_scores:
+            recommended = 'ensemble'
+            confidence = 0.0
+        else:
+            # Sort by composite score
+            sorted_strategies = sorted(
+                strategy_scores.items(),
+                key=lambda x: x[1]['score'],
+                reverse=True
+            )
+            
+            recommended = sorted_strategies[0][0]
+            best_score = sorted_strategies[0][1]['score']
+            
+            # Calculate confidence based on score difference
+            if len(sorted_strategies) > 1:
+                second_score = sorted_strategies[1][1]['score']
+                score_diff = best_score - second_score
+                confidence = min(score_diff * 2, 1.0)  # Scale to 0-1
+            else:
+                confidence = best_score
+        
+        print(f"Recommended strategy: {recommended} (confidence: {confidence:.2%})")
+        print(f"Strategy performance:")
+        for strat, score_data in sorted(strategy_scores.items(), key=lambda x: x[1]['score'], reverse=True)[:5]:
+            print(f"  {strat}: score={score_data['score']:.3f}, win_rate={score_data['win_rate']:.2%}, "
+                  f"avg_matches={score_data['avg_matches']:.2f}")
+        
+        return {
+            'recommended_strategy': recommended,
+            'confidence': confidence,
+            'strategy_performance': strategy_scores,
+            'strategy_stats': strategy_stats,
+            'total_analyzed': len(winning_predictions)
+        }
+    
+    def recommend_strategy(self, winning_predictions: List[Dict], 
+                          current_lotto_type: str = None) -> str:
+        """
+        Recommend the best strategy based on past winning predictions.
+        
+        Args:
+            winning_predictions: List of winning prediction records
+            current_lotto_type: Optional lotto type to filter by
+        
+        Returns:
+            Recommended strategy name
+        """
+        # Filter by lotto type if provided
+        if current_lotto_type:
+            filtered = [p for p in winning_predictions 
+                       if p.get('lotto_type') == current_lotto_type]
+            if filtered:
+                winning_predictions = filtered
+        
+        analysis = self.analyze_strategy_performance(winning_predictions)
+        return analysis['recommended_strategy']
 
 
 # ============================================================================
@@ -2424,6 +2724,9 @@ class EnhancedLottoOracle:
         
         # Transfer Pattern Analyzer for cross-context pattern detection
         self.transfer_analyzer = TransferPatternAnalyzer()
+        
+        # Check and Balance Analyzer for meta-learning from winning predictions
+        self.check_balance_analyzer = CheckAndBalanceAnalyzer()
 
         # State tracking
         self.performance_history = []
@@ -2700,54 +3003,96 @@ class EnhancedLottoOracle:
                 from intelligenceEngine import IntelligenceEngine
                 intel_engine = IntelligenceEngine(self.historical, machine_draws, seed=seed)
                 
-                # Generate multiple persona tickets
-                personas = ['balanced', 'structural_anchor', 'machine_memory_hunter', 
-                           'cluster_rider', 'breakout_speculator']
+                # Generate multiple persona tickets - prioritize non-balanced personas
+                # Order matters: start with more specialized personas first
+                personas = ['machine_memory_hunter', 'structural_anchor', 'cluster_rider', 
+                           'breakout_speculator', 'balanced']  # balanced last as fallback
                 all_tickets = []
+                persona_ticket_map = {}  # Track which persona generated which tickets
+                
                 for persona in personas:
                     try:
                         tickets = intel_engine.generate_persona_tickets(persona)
-                        if tickets:
-                            all_tickets.extend(tickets)
+                        if tickets and len(tickets) > 0:
+                            # Validate tickets
+                            valid_tickets = [t for t in tickets if isinstance(t, list) and len(t) == 5]
+                            if valid_tickets:
+                                all_tickets.extend(valid_tickets)
+                                persona_ticket_map[persona] = len(valid_tickets)
+                                print(f"Generated {len(valid_tickets)} valid ticket(s) from {persona} persona")
                     except Exception as e:
                         print(f"Warning: Persona {persona} failed: {e}")
                         continue
+                
+                # Generate additional diverse tickets using hybrid approaches
+                try:
+                    # Hybrid 1: Top lag + top temporal + top burst
+                    hybrid_tickets = intel_engine.generate_hybrid_tickets()
+                    if hybrid_tickets:
+                        all_tickets.extend(hybrid_tickets)
+                        print(f"Generated {len(hybrid_tickets)} hybrid ticket(s)")
+                except Exception as e:
+                    print(f"Hybrid ticket generation failed: {e}")
                 
                 # Score all tickets and return best
                 if all_tickets:
                     scored = [(t, intel_engine.score_ticket(t)) for t in all_tickets]
                     scored.sort(key=lambda x: x[1], reverse=True)
-                    # Return top prediction - check if scored has elements
-                    if scored and len(scored) > 0 and len(scored[0]) > 0:
-                        results['intelligence'] = [scored[0][0]]
+                    
+                    # Return top 3 predictions (not just one) for better diversity
+                    top_predictions = []
+                    seen_combinations = set()
+                    
+                    for ticket, score in scored:
+                        ticket_tuple = tuple(sorted(ticket))
+                        if ticket_tuple not in seen_combinations:
+                            seen_combinations.add(ticket_tuple)
+                            top_predictions.append(ticket)
+                            if len(top_predictions) >= 3:  # Get top 3 diverse predictions
+                                break
+                    
+                    if top_predictions:
+                        # Use the highest scoring one as primary
+                        results['intelligence'] = [top_predictions[0]]
+                        print(f"Intelligence strategy: Selected top prediction with score {scored[0][1]:.4f}")
+                        print(f"  Persona breakdown: {persona_ticket_map}")
                     else:
-                        # Fallback if scored is empty
-                        print(f"WARNING: scored list is empty, using fallback")
-                        raise ValueError("No scored tickets available")
+                        # Fallback: use top scored ticket even if duplicate
+                        results['intelligence'] = [scored[0][0]]
+                        print(f"Intelligence strategy: Using top scored ticket (no diversity filter)")
                 else:
-                    # Fallback: use balanced persona directly
-                    try:
-                        fallback_ticket = intel_engine.predict('balanced')
-                        if fallback_ticket and len(fallback_ticket) == 5:
-                            results['intelligence'] = [fallback_ticket]
-                        else:
-                            # Last resort: use top 5 by unified score
-                            all_scores = {k: intel_engine.compute_unified_score(k) 
-                                        for k in range(1, 91)}
-                            top_5 = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)[:5]
-                            results['intelligence'] = [sorted([n for n, _ in top_5])]
-                    except Exception as e:
-                        print(f"Fallback prediction failed: {e}")
-                        # Last resort: use top 5 by unified score
+                    # Enhanced fallback: try each persona individually
+                    print("WARNING: No tickets generated from any persona, trying individual fallbacks...")
+                    fallback_success = False
+                    for persona in ['machine_memory_hunter', 'structural_anchor', 'cluster_rider']:
+                        try:
+                            fallback_ticket = intel_engine.predict(persona)
+                            if fallback_ticket and len(fallback_ticket) == 5:
+                                results['intelligence'] = [fallback_ticket]
+                                print(f"Intelligence strategy: Using {persona} persona as fallback")
+                                fallback_success = True
+                                break
+                        except Exception as e:
+                            print(f"Persona {persona} fallback failed: {e}")
+                            continue
+                    
+                    if not fallback_success:
+                        # Last resort: use top 5 by unified score with co-occurrence boost
                         try:
                             all_scores = {k: intel_engine.compute_unified_score(k) 
                                         for k in range(1, 91)}
+                            # Boost scores with co-occurrence patterns
+                            boosted_scores = intel_engine.boost_with_cooccurrence(all_scores)
+                            top_5 = sorted(boosted_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+                            results['intelligence'] = [sorted([n for n, _ in top_5])]
+                            print(f"Intelligence strategy: Using co-occurrence boosted unified scores")
+                        except Exception as e:
+                            print(f"Co-occurrence boost failed: {e}")
+                            # Absolute last resort
+                            all_scores = {k: intel_engine.compute_unified_score(k) 
+                                        for k in range(1, 91)}
                             top_5 = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)[:5]
                             results['intelligence'] = [sorted([n for n, _ in top_5])]
-                        except Exception as e2:
-                            print(f"Last resort failed: {e2}")
-                            # Absolute last resort: return first 5 numbers (should never happen)
-                            results['intelligence'] = [[1, 2, 3, 4, 5]]
             except Exception as e:
                 import traceback
                 error_msg = f"Intelligence engine failed: {str(e)}\n{traceback.format_exc()}"
@@ -2950,6 +3295,54 @@ class EnhancedLottoOracle:
                 except:
                     results['transfer'] = [[5, 20, 40, 60, 85]]
 
+        elif strategy == 'check_balance':
+            # Check and Balance Strategy - meta-learning from past winning predictions
+            # Analyzes which strategies have been most successful and uses the best one
+            print("Generating check-and-balance prediction...")
+            check_balance_pred = None
+            try:
+                # Note: winning_predictions should be passed from app.py
+                # For now, we'll use the analyzer to recommend a strategy
+                # and then generate a prediction using that strategy
+                
+                # This will be handled in app.py by calling generate_predictions
+                # with the recommended strategy, but we need to handle it here too
+                # as a fallback
+                
+                print("Check-and-balance: Using ensemble as default (should be handled by app.py)")
+                check_balance_pred = self._ml_based_prediction(patterns)
+                
+                if not check_balance_pred or len(check_balance_pred) != 5:
+                    check_balance_pred = self._pattern_based_prediction(patterns)
+                
+                if check_balance_pred and len(check_balance_pred) == 5:
+                    results['check_balance'] = [check_balance_pred]
+                    print(f"Check-and-balance prediction: {check_balance_pred}")
+                else:
+                    # Fallback
+                    from collections import Counter
+                    all_numbers = []
+                    for draw in self.historical:
+                        all_numbers.extend(draw)
+                    freq = Counter(all_numbers)
+                    check_balance_pred = sorted([n for n, _ in freq.most_common(5)])
+                    results['check_balance'] = [check_balance_pred]
+                    print(f"Check-and-balance fallback: {check_balance_pred}")
+                    
+            except Exception as e:
+                import traceback
+                print(f"Check-and-balance strategy failed with exception: {e}")
+                print(traceback.format_exc())
+                # Emergency fallback
+                try:
+                    pred = self._pattern_based_prediction(patterns)
+                    if pred and len(pred) == 5:
+                        results['check_balance'] = [pred]
+                    else:
+                        results['check_balance'] = [[15, 30, 45, 60, 75]]
+                except:
+                    results['check_balance'] = [[15, 30, 45, 60, 75]]
+
         # Apply anti-pattern filtering to all predictions (with error handling)
         print("Applying anti-pattern filtering...")
         try:
@@ -3095,30 +3488,105 @@ class EnhancedLottoOracle:
         }
 
     def _ml_based_prediction(self, patterns: Dict) -> List[int]:
-        """Generate prediction using ML - deterministic selection"""
+        """Generate prediction using ML with enhanced recency and co-occurrence weighting"""
         # Get probability distribution from ML
         probs = self.ml_predictor.predict_proba(self.historical)
-
-        # Deterministic selection: Use top probabilities with deterministic tie-breaking
-        # Sort by probability, then by number for deterministic ordering
-        sorted_nums = sorted(probs.items(), key=lambda x: (x[1], -x[0]), reverse=True)
         
-        # Select top 5 numbers deterministically
-        # Use a mix: top 3 highest probability + 2 from next tier for diversity
+        # Enhance probabilities with recency boost
+        enhanced_probs = {}
+        recent_window = min(10, len(self.historical))
+        
+        for num in range(1, 91):
+            base_prob = probs.get(num, 0.0)
+            recency_boost = 0.0
+            
+            # Boost numbers that appeared in recent draws
+            for i in range(max(0, len(self.historical) - recent_window), len(self.historical)):
+                if num in self.historical[i]:
+                    recency = (i - (len(self.historical) - recent_window) + 1) / recent_window
+                    recency_boost += 0.15 * (1.0 + recency)  # Up to 0.3 boost
+            
+            # Boost numbers that co-occur with recent winners
+            recent_winners = set()
+            for draw in self.historical[-5:]:
+                recent_winners.update(draw)
+            
+            cooccurrence_boost = 0.0
+            for recent_num in recent_winners:
+                if recent_num != num:
+                    # Check historical co-occurrence
+                    cooccur_count = sum(1 for draw in self.historical[-20:] 
+                                      if num in draw and recent_num in draw)
+                    if cooccur_count > 0:
+                        cooccurrence_boost += 0.1 * min(cooccur_count / 3.0, 1.0)
+            
+            enhanced_probs[num] = base_prob * (1.0 + recency_boost + cooccurrence_boost)
+
+        # Sort by enhanced probability
+        sorted_nums = sorted(enhanced_probs.items(), key=lambda x: (x[1], -x[0]), reverse=True)
+
+        # Enhanced selection: balance high probability with diversity and co-occurrence
         selected = []
         
-        # Top 3 highest probability
-        for num, prob in sorted_nums[:3]:
+        # Top 2 highest probability (anchor numbers)
+        for num, prob in sorted_nums[:2]:
             selected.append(num)
         
-        # Next 2 from positions 4-15 for diversity (avoid all top numbers)
-        for num, prob in sorted_nums[3:15]:
-            if num not in selected:
-                selected.append(num)
-                if len(selected) >= 5:
-                    break
+        # Next: select numbers that co-occur well with selected ones
+        remaining = [n for n, _ in sorted_nums if n not in selected]
         
-        # Fill if needed (shouldn't happen, but safety check)
+        # Score remaining candidates by: probability + co-occurrence with selected
+        candidate_scores = {}
+        for num, prob in sorted_nums[2:20]:  # Consider top 20
+            if num not in selected:
+                score = prob
+                # Co-occurrence bonus with already selected numbers
+                for sel_num in selected:
+                    cooccur = sum(1 for draw in self.historical[-30:] 
+                                if num in draw and sel_num in draw)
+                    score += 0.1 * min(cooccur / 2.0, 1.0)
+                candidate_scores[num] = score
+        
+        # Select next 2 based on enhanced scores
+        sorted_candidates = sorted(candidate_scores.items(), key=lambda x: x[1], reverse=True)
+        for num, _ in sorted_candidates[:2]:
+            selected.append(num)
+            if len(selected) >= 4:
+                break
+        
+        # Last number: balance sum, evens/odds, high/low
+        if len(selected) < 5:
+            current_sum = sum(selected)
+            current_evens = sum(1 for n in selected if n % 2 == 0)
+            current_highs = sum(1 for n in selected if n > 45)
+            
+            # Ideal: sum 150-250, 2-3 evens, 2-3 highs
+            best_candidate = None
+            best_score = -float('inf')
+            
+            for num, prob in sorted_nums:
+                if num not in selected:
+                    test_sum = current_sum + num
+                    test_evens = current_evens + (1 if num % 2 == 0 else 0)
+                    test_highs = current_highs + (1 if num > 45 else 0)
+                    
+                    # Score based on how well it balances the ticket
+                    score = prob
+                    if 150 <= test_sum <= 250:
+                        score += 0.2
+                    if 2 <= test_evens <= 3:
+                        score += 0.15
+                    if 2 <= test_highs <= 3:
+                        score += 0.15
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_candidate = num
+            
+            if best_candidate:
+                selected.append(best_candidate)
+        
+        # Fill if needed
         if len(selected) < 5:
             for num, prob in sorted_nums:
                 if num not in selected:
@@ -3129,37 +3597,43 @@ class EnhancedLottoOracle:
         return sorted(selected)
 
     def _genetic_optimization(self, patterns: Dict) -> List[int]:
-        """Generate prediction using genetic optimization - distinct from ML"""
+        """Generate prediction using genetic optimization with enhanced recency weighting"""
         # Create pattern-based probabilities (NOT ML-based) for differentiation
         probs = {}
         
-        # Base probability from pattern analysis
-        hot_weight = 0.4
-        cold_weight = 0.3
-        due_weight = 0.2
-        frequency_weight = 0.1
+        # Enhanced weights: more emphasis on recent patterns
+        hot_weight = 0.35
+        cold_weight = 0.25
+        due_weight = 0.15
+        frequency_weight = 0.10
+        recency_weight = 0.15  # NEW: recency boost
         
-        # Calculate frequency from recent draws
+        # Calculate frequency from recent draws (weighted by recency)
         freq = Counter()
-        for draw in self.historical[-30:]:  # Last 30 draws
+        recency_freq = Counter()  # More recent = higher weight
+        for i, draw in enumerate(self.historical[-30:]):  # Last 30 draws
+            recency = (i + 1) / 30.0  # More recent = higher weight
             for num in draw:
                 freq[num] += 1
+                recency_freq[num] += recency  # Weighted by recency
         
         max_freq = max(freq.values()) if freq else 1
+        max_recency_freq = max(recency_freq.values()) if recency_freq else 1
         
         # Build probability distribution from patterns
         for num in range(1, 91):
             score = 0.01  # Base score
             
             # Hot numbers boost
-            if num in patterns.get('hot_numbers', [])[:10]:
-                score += hot_weight
+            if num in patterns.get('hot_numbers', [])[:15]:  # Increased from 10
+                rank = patterns.get('hot_numbers', []).index(num) if num in patterns.get('hot_numbers', []) else 15
+                score += hot_weight * (1.0 - rank / 15.0)  # Higher rank = more boost
             
             # Cold numbers boost (if very cold)
             if num in patterns.get('cold_numbers', [])[:5]:
                 skip = patterns.get('skips', {}).get(num, 0)
                 if skip > 20:
-                    score += cold_weight * (skip / 30)  # More cold = higher boost
+                    score += cold_weight * min(skip / 30.0, 1.0)  # More cold = higher boost
             
             # Due numbers (around average skip)
             avg_skip = np.mean(list(patterns.get('skips', {}).values())) if patterns.get('skips') else 10
@@ -3169,6 +3643,9 @@ class EnhancedLottoOracle:
             
             # Frequency boost
             score += frequency_weight * (freq.get(num, 0) / max_freq)
+            
+            # Recency boost (NEW - high weight for recent appearances)
+            score += recency_weight * (recency_freq.get(num, 0) / max_recency_freq)
             
             probs[num] = score
         
@@ -3191,9 +3668,9 @@ class EnhancedLottoOracle:
         return self.genetic_optimizer.evolve_solution(probs, constraints)
 
     def _pattern_based_prediction(self, patterns: Dict) -> List[int]:
-        """Generate prediction using pattern matching - deterministic"""
-        # Create candidate pool with mix of hot, cold, and due numbers
-        hot_pool = patterns.get('hot_numbers', [])[:10]
+        """Generate prediction using pattern matching with enhanced recency and co-occurrence"""
+        # Enhanced candidate pool: prioritize recent patterns
+        hot_pool = patterns.get('hot_numbers', [])[:15]  # Increased from 10
         cold_pool = [n for n in patterns.get('cold_numbers', []) 
                     if patterns.get('skips', {}).get(n, 0) > 15][:10]
 
@@ -3201,9 +3678,15 @@ class EnhancedLottoOracle:
         skips = patterns.get('skips', {})
         avg_skip = np.mean(list(skips.values())) if skips else 10
         due_pool = [n for n in range(1, 91)
-                    if 0.8 * avg_skip <= skips.get(n, 0) <= 1.2 * avg_skip][:10]
+                    if 0.8 * avg_skip <= skips.get(n, 0) <= 1.2 * avg_skip][:15]  # Increased
+        
+        # Add recent winners (last 5-10 draws) - they often repeat
+        recent_winners = set()
+        for draw in self.historical[-10:]:
+            recent_winners.update(draw)
+        recent_pool = list(recent_winners)[:15]
 
-        candidate_pool = list(set(hot_pool + cold_pool + due_pool))
+        candidate_pool = list(set(hot_pool + cold_pool + due_pool + recent_pool))
 
         # Ensure we have enough candidates
         if len(candidate_pool) < 15:
@@ -3259,14 +3742,21 @@ class EnhancedLottoOracle:
 
     def _score_pattern_candidate(self, candidate: List[int],
                                  patterns: Dict) -> float:
-        """Score a candidate based on pattern matching"""
+        """Score a candidate based on pattern matching (enhanced with recency and co-occurrence)"""
         score = 0
 
-        # Hot numbers bonus
+        # Hot numbers bonus (increased weight)
         hot_numbers = patterns.get('hot_numbers', [])
         if hot_numbers:
-            hot_bonus = sum(1 for n in candidate if n in hot_numbers[:10])
-            score += hot_bonus * 2
+            hot_bonus = sum(1 for n in candidate if n in hot_numbers[:15])  # Increased from 10
+            score += hot_bonus * 2.5  # Increased from 2
+
+        # Recent winners bonus (NEW - high weight)
+        recent_winners = set()
+        for draw in self.historical[-10:]:
+            recent_winners.update(draw)
+        recent_bonus = sum(1 for n in candidate if n in recent_winners)
+        score += recent_bonus * 3.0  # Strong weight for recent winners
 
         # Cold numbers bonus (if very cold)
         cold_numbers = patterns.get('cold_numbers', [])
@@ -3282,6 +3772,18 @@ class EnhancedLottoOracle:
         if sum_range[0] <= total <= sum_range[1]:
             score += 5
 
+        # Co-occurrence pattern bonus (NEW - important for wins)
+        if len(candidate) >= 2:
+            cooccur_bonus = 0.0
+            for i, num1 in enumerate(candidate):
+                for num2 in candidate[i+1:]:
+                    # Check historical co-occurrence
+                    cooccur_count = sum(1 for draw in self.historical[-30:] 
+                                      if num1 in draw and num2 in draw)
+                    if cooccur_count >= 2:
+                        cooccur_bonus += 0.5 * min(cooccur_count / 3.0, 1.0)
+            score += cooccur_bonus
+        
         # Even/Odd balance
         evens = sum(1 for n in candidate if n % 2 == 0)
         if evens in [2, 3]:

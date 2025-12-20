@@ -295,32 +295,51 @@ class IntelligenceEngine:
                     family_support = max(cluster_scores) / (max_temporal + 1e-6)
                 break
         
-        # State modifier
+        # Recency boost: extra weight for numbers that appeared in recent draws
+        recency_boost = 0.0
+        recent_window = min(10, self.T)  # Last 10 draws
+        for i in range(max(0, self.T - recent_window), self.T):
+            if 0 <= i < len(self.historical) and k in self.historical[i]:
+                # More recent = higher boost
+                recency = (i - (self.T - recent_window) + 1) / recent_window
+                recency_boost += 0.2 * recency  # Up to 0.2 boost for very recent
+        
+        # Also check recent machine appearances (they often predict wins)
+        for i in range(max(0, self.T - recent_window), self.T):
+            if 0 <= i < len(self.machines) and k in self.machines[i]:
+                recency = (i - (self.T - recent_window) + 1) / recent_window
+                recency_boost += 0.15 * recency  # Up to 0.15 boost
+        
+        recency_norm = min(recency_boost, 1.0)  # Cap at 1.0
+        
+        # State modifier (enhanced)
         state = self.get_number_state(k)
         state_modifiers = {
-            'Active': 1.2,
-            'Warming': 1.1,
-            'Breakout': 1.15,
-            'Overheated': 0.8,  # Penalty for just appeared
-            'Dormant': 0.7
+            'Active': 1.25,  # Increased
+            'Warming': 1.15,  # Increased
+            'Breakout': 1.20,  # Increased
+            'Overheated': 0.75,  # Slightly more penalty
+            'Dormant': 0.65  # Slightly more penalty
         }
         state_mod = state_modifiers.get(state, 1.0)
         
-        # Compute unified score
+        # Compute unified score with recency boost
         score = (
             weights['temporal'] * temporal_norm +
             weights['lag'] * lag_norm +
             weights['burst'] * burst_norm +
             weights['pair'] * pair_norm +
-            weights['family'] * family_support
+            weights['family'] * family_support +
+            weights.get('recency', 0.0) * recency_norm
         ) * state_mod
         
         return score
     
     def score_ticket(self, ticket: List[int]) -> float:
         """
-        Set (Ticket) Intelligence Engine
-        TicketScore(T) = Σ Score(ki) + PairSynergy(T) + FamilyCoherence(T) - RedundancyPenalty(T)
+        Set (Ticket) Intelligence Engine (Enhanced)
+        TicketScore(T) = Σ Score(ki) + PairSynergy(T) + FamilyCoherence(T) 
+                        + RecentPatternMatch(T) - RedundancyPenalty(T) + DiversityBonus(T)
         """
         if len(ticket) != 5:
             return 0.0
@@ -329,45 +348,93 @@ class IntelligenceEngine:
         if self._temporal_scores is None:
             _ = self.compute_unified_score(1)  # Initialize caches
         
-        # Base score sum
+        # Base score sum (weighted by individual number scores)
         base_score = sum(self.compute_unified_score(k) for k in ticket)
         
-        # Pair synergy
+        # Enhanced pair synergy (stronger weighting for high gravity pairs)
         pair_synergy = 0.0
+        strong_pairs = 0
         for i, j in combinations(ticket, 2):
             gravity = self.compute_pair_gravity(i, j)
-            if gravity > 1.0:
-                pair_synergy += (gravity - 1.0) * 0.5
+            if gravity > 1.5:  # Strong co-occurrence
+                pair_synergy += (gravity - 1.0) * 0.8  # Increased multiplier
+                strong_pairs += 1
+            elif gravity > 1.0:
+                pair_synergy += (gravity - 1.0) * 0.4
         
-        # Family coherence
+        # Bonus for multiple strong pairs
+        if strong_pairs >= 3:
+            pair_synergy *= 1.3  # 30% boost for 3+ strong pairs
+        
+        # Enhanced family coherence
         family_coherence = 0.0
         if self._family_clusters is None:
             self._family_clusters = self.compute_family_clusters()
         
         for cluster in self._family_clusters.values():
             ticket_in_cluster = [n for n in ticket if n in cluster]
-            if len(ticket_in_cluster) >= 2:
+            if len(ticket_in_cluster) >= 3:
+                family_coherence += len(ticket_in_cluster) * 0.5  # Increased for 3+
+            elif len(ticket_in_cluster) >= 2:
                 family_coherence += len(ticket_in_cluster) * 0.3
         
-        # Redundancy penalty (too many from same state)
+        # Recent pattern match: check if ticket matches recent winning patterns
+        recent_pattern_bonus = 0.0
+        recent_window = min(20, self.T)  # Check last 20 draws
+        ticket_set = set(ticket)
+        
+        for i in range(max(0, self.T - recent_window), self.T):
+            if 0 <= i < len(self.historical):
+                recent_draw = set(self.historical[i])
+                matches = len(ticket_set & recent_draw)
+                if matches >= 3:
+                    # Strong pattern match
+                    recency = (i - (self.T - recent_window) + 1) / recent_window
+                    recent_pattern_bonus += matches * 0.15 * (1.0 + recency)  # More recent = higher bonus
+                elif matches >= 2:
+                    recency = (i - (self.T - recent_window) + 1) / recent_window
+                    recent_pattern_bonus += matches * 0.08 * (1.0 + recency)
+        
+        # Redundancy penalty (enhanced)
         states = [self.get_number_state(k) for k in ticket]
         state_counts = Counter(states)
         redundancy_penalty = 0.0
         if state_counts.get('Overheated', 0) > 1:
-            redundancy_penalty += 0.5
+            redundancy_penalty += 0.6  # Increased penalty
         if state_counts.get('Active', 0) > 3:
-            redundancy_penalty += 0.3
+            redundancy_penalty += 0.4  # Increased penalty
+        if state_counts.get('Dormant', 0) > 2:
+            redundancy_penalty += 0.3  # Penalty for too many dormant
+        
+        # Diversity bonus: reward balanced distribution across states
+        unique_states = len(set(states))
+        diversity_bonus = 0.0
+        if unique_states >= 3:
+            diversity_bonus = 0.2  # Bonus for diverse states
+        elif unique_states == 2:
+            diversity_bonus = 0.1
         
         # Ensure at least one anchor (high stability number)
         if self._temporal_scores:
             top_anchors = sorted(self._temporal_scores.items(), key=lambda x: x[1], reverse=True)[:10]
             anchor_nums = {n for n, _ in top_anchors}
             has_anchor = any(n in anchor_nums for n in ticket)
-            anchor_bonus = 0.2 if has_anchor else -0.3
+            anchor_bonus = 0.3 if has_anchor else -0.4  # Increased bonus/penalty
         else:
             anchor_bonus = 0.0
         
-        return base_score + pair_synergy + family_coherence - redundancy_penalty + anchor_bonus
+        # Sum range bonus: reward tickets with numbers in winning sum ranges
+        ticket_sum = sum(ticket)
+        # Historical winning sums analysis (typical range: 150-250 for 5 numbers from 1-90)
+        if 150 <= ticket_sum <= 250:
+            sum_bonus = 0.1
+        elif 120 <= ticket_sum <= 280:
+            sum_bonus = 0.05
+        else:
+            sum_bonus = -0.1  # Penalty for extreme sums
+        
+        return (base_score + pair_synergy + family_coherence + recent_pattern_bonus 
+                - redundancy_penalty + anchor_bonus + diversity_bonus + sum_bonus)
     
     def generate_persona_tickets(self, persona: str = 'balanced') -> List[List[int]]:
         """
@@ -597,4 +664,111 @@ class IntelligenceEngine:
         fallback_result = sorted([n for n, _ in sorted_numbers[:5]])
         print(f"DEBUG: Fallback result: {fallback_result}")
         return fallback_result
+    
+    def generate_hybrid_tickets(self, count: int = 3) -> List[List[int]]:
+        """
+        Generate hybrid tickets combining multiple strategies
+        """
+        tickets = []
+        all_scores = {k: self.compute_unified_score(k) for k in range(1, N_NUMBERS + 1)}
+        sorted_numbers = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # Ensure caches are initialized
+        if self._lag_signatures is None:
+            for k in range(1, N_NUMBERS + 1):
+                _ = self.compute_lag_signature(k)
+        if self._burst_indices is None:
+            for k in range(1, N_NUMBERS + 1):
+                _ = self.compute_burst_index(k)
+        if self._family_clusters is None:
+            self._family_clusters = self.compute_family_clusters()
+        
+        # Hybrid 1: Top 2 temporal + Top 2 lag + Top 1 burst
+        if self._lag_signatures and self._burst_indices:
+            lag_sorted = sorted(self._lag_signatures.items(), key=lambda x: x[1], reverse=True)
+            burst_sorted = sorted(self._burst_indices.items(), key=lambda x: x[1], reverse=True)
+            
+            ticket1 = []
+            ticket1.extend([n for n, _ in sorted_numbers[:2]])  # Top 2 temporal
+            ticket1.extend([n for n, _ in lag_sorted[:2] if n not in ticket1])  # Top 2 lag
+            ticket1.extend([n for n, _ in burst_sorted[:1] if n not in ticket1])  # Top 1 burst
+            if len(ticket1) < 5:
+                for n, _ in sorted_numbers:
+                    if n not in ticket1:
+                        ticket1.append(n)
+                        if len(ticket1) >= 5:
+                            break
+            if len(ticket1) == 5:
+                tickets.append(sorted(ticket1))
+        
+        # Hybrid 2: Recent winners (last 5 draws) + high lag
+        if len(self.historical) >= 5:
+            recent_numbers = set()
+            for draw in self.historical[-5:]:
+                recent_numbers.update(draw)
+            recent_list = list(recent_numbers)
+            
+            if self._lag_signatures:
+                lag_sorted = sorted(self._lag_signatures.items(), key=lambda x: x[1], reverse=True)
+                ticket2 = []
+                # Take 2 from recent winners
+                ticket2.extend([n for n in recent_list if n in [num for num, _ in sorted_numbers[:30]]][:2])
+                # Take 2 from high lag
+                ticket2.extend([n for n, _ in lag_sorted[:10] if n not in ticket2][:2])
+                # Take 1 from top scores
+                ticket2.extend([n for n, _ in sorted_numbers[:15] if n not in ticket2][:1])
+                if len(ticket2) < 5:
+                    for n, _ in sorted_numbers:
+                        if n not in ticket2:
+                            ticket2.append(n)
+                            if len(ticket2) >= 5:
+                                break
+                if len(ticket2) == 5:
+                    tickets.append(sorted(ticket2))
+        
+        # Hybrid 3: Family cluster + high scores
+        if self._family_clusters:
+            largest_family = max(self._family_clusters.values(), key=len) if self._family_clusters else []
+            if len(largest_family) >= 2:
+                ticket3 = []
+                ticket3.extend(sorted(largest_family[:2]))  # 2 from family
+                ticket3.extend([n for n, _ in sorted_numbers[:20] if n not in ticket3][:3])  # 3 from top scores
+                if len(ticket3) == 5:
+                    tickets.append(sorted(ticket3))
+        
+        return tickets[:count]  # Return up to count tickets
+    
+    def boost_with_cooccurrence(self, scores: Dict[int, float]) -> Dict[int, float]:
+        """
+        Boost scores based on co-occurrence patterns with high-scoring numbers
+        """
+        boosted = scores.copy()
+        
+        # Get top 20 numbers by current score
+        top_20 = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:20]
+        top_nums = [n for n, _ in top_20]
+        
+        # For each number, check co-occurrence with top numbers
+        for num in range(1, N_NUMBERS + 1):
+            cooccurrence_boost = 0.0
+            for top_num in top_nums[:10]:  # Check top 10
+                if num != top_num:
+                    gravity = self.compute_pair_gravity(num, top_num)
+                    if gravity > 1.5:  # Strong co-occurrence
+                        cooccurrence_boost += (gravity - 1.0) * 0.1
+            
+            # Also check if in family with top numbers
+            if self._family_clusters is None:
+                self._family_clusters = self.compute_family_clusters()
+            
+            for cluster in self._family_clusters.values():
+                if num in cluster:
+                    cluster_top_count = sum(1 for n in cluster if n in top_nums)
+                    if cluster_top_count >= 1:
+                        cooccurrence_boost += 0.15 * cluster_top_count
+                    break
+            
+            boosted[num] = scores[num] * (1.0 + min(cooccurrence_boost, 0.3))  # Cap boost at 30%
+        
+        return boosted
 

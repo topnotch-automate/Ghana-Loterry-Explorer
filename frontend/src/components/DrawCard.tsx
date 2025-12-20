@@ -8,7 +8,7 @@ interface DrawCardProps {
   onClick?: () => void;
 }
 
-export const DrawCard: React.FC<DrawCardProps> = ({ draw, queryNumbers = [], onClick }) => {
+const DrawCardComponent: React.FC<DrawCardProps> = ({ draw, queryNumbers = [], onClick }) => {
   const isHighlighted = (num: number) => queryNumbers.includes(num);
   const searchResult = draw as SearchResult;
 
@@ -86,4 +86,15 @@ export const DrawCard: React.FC<DrawCardProps> = ({ draw, queryNumbers = [], onC
     </div>
   );
 };
+
+// Memoize to prevent unnecessary re-renders
+export const DrawCard = React.memo(DrawCardComponent, (prevProps, nextProps) => {
+  // Only re-render if draw ID or query numbers change
+  return (
+    prevProps.draw.id === nextProps.draw.id &&
+    prevProps.draw.drawDate === nextProps.draw.drawDate &&
+    JSON.stringify(prevProps.queryNumbers) === JSON.stringify(nextProps.queryNumbers) &&
+    prevProps.onClick === nextProps.onClick
+  );
+});
 

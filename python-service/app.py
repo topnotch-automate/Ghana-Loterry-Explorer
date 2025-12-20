@@ -125,6 +125,8 @@ def predict():
         lotto_types = data.get('lotto_types', [])  # Lotto types for yearly analysis
         strategy = data.get('strategy', 'ensemble')
         n_predictions = data.get('n_predictions', 3)
+        winning_predictions = data.get('winning_predictions', [])  # For check-and-balance
+        current_lotto_type = data.get('current_lotto_type', None)  # For check-and-balance
         
         # Store original count for logging (before filtering)
         original_draw_count = len(draws)
@@ -264,11 +266,11 @@ def predict():
         if historical_draws_cache != draws_tuple or oracle_instance is None or (strategy == 'yearly' and dates_changed):
             historical_draws_cache = draws_tuple
             try:
-                # Pass draw_dates and lotto_types for yearly and transfer strategies
+                # Pass draw_dates and lotto_types for yearly, transfer, and check_balance strategies
                 initialize_oracle(
                     draws, 
-                    draw_dates if strategy in ['yearly', 'transfer'] else None,
-                    lotto_types if strategy in ['yearly', 'transfer'] else None
+                    draw_dates if strategy in ['yearly', 'transfer', 'check_balance'] else None,
+                    lotto_types if strategy in ['yearly', 'transfer', 'check_balance'] else None
                 )
             except Exception as e:
                 print(f"ERROR: Failed to initialize oracle: {e}")
@@ -284,22 +286,76 @@ def predict():
                 'message': 'The prediction oracle is not available. Please try again.'
             }), 500
         
-        # Generate predictions (now deterministic based on data + strategy)
-        print(f"DEBUG: About to call generate_predictions with strategy={strategy}, draws={len(draws)}, machine_draws={'present' if machine_draws else 'None'} ({len(machine_draws) if machine_draws else 0} entries)")
-        try:
-            predictions = oracle_instance.generate_predictions(
-                strategy=strategy,
-                n_predictions=n_predictions,
-                machine_draws=machine_draws if machine_draws else None
-            )
-        except Exception as e:
-            print(f"ERROR: generate_predictions failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({
-                'error': 'Prediction generation failed',
-                'message': str(e)
-            }), 500
+        # Special handling for check_balance strategy
+        if strategy == 'check_balance':
+            print("Check-and-balance strategy: Analyzing past winning predictions...")
+            try:
+                # Analyze winning predictions to recommend best strategy
+                recommended_strategy = oracle_instance.check_balance_analyzer.recommend_strategy(
+                    winning_predictions,
+                    current_lotto_type
+                )
+                
+                print(f"Check-and-balance: Recommended strategy is '{recommended_strategy}'")
+                
+                # Generate prediction using recommended strategy
+                predictions = oracle_instance.generate_predictions(
+                    strategy=recommended_strategy,
+                    n_predictions=1,
+                    machine_draws=machine_draws if machine_draws else None
+                )
+                
+                # Rename the prediction to 'check_balance'
+                if recommended_strategy in predictions:
+                    predictions['check_balance'] = predictions.pop(recommended_strategy)
+                    print(f"Check-and-balance: Generated prediction using '{recommended_strategy}' strategy")
+                else:
+                    # Fallback if recommended strategy didn't work
+                    print(f"Warning: Recommended strategy '{recommended_strategy}' did not return predictions, using ensemble")
+                    predictions = oracle_instance.generate_predictions(
+                        strategy='ensemble',
+                        n_predictions=1,
+                        machine_draws=machine_draws if machine_draws else None
+                    )
+                    if 'ensemble' in predictions:
+                        predictions['check_balance'] = predictions.pop('ensemble')
+                        
+            except Exception as e:
+                print(f"Check-and-balance analysis failed: {e}, falling back to ensemble")
+                import traceback
+                traceback.print_exc()
+                predictions = oracle_instance.generate_predictions(
+                    strategy='ensemble',
+                    n_predictions=1,
+                    machine_draws=machine_draws if machine_draws else None
+                )
+                if 'ensemble' in predictions:
+                    predictions['check_balance'] = predictions.pop('ensemble')
+            except Exception as e:
+                print(f"ERROR: Check-and-balance prediction generation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'error': 'Check-and-balance prediction generation failed',
+                    'message': str(e)
+                }), 500
+        else:
+            # Generate predictions (now deterministic based on data + strategy)
+            print(f"DEBUG: About to call generate_predictions with strategy={strategy}, draws={len(draws)}, machine_draws={'present' if machine_draws else 'None'} ({len(machine_draws) if machine_draws else 0} entries)")
+            try:
+                predictions = oracle_instance.generate_predictions(
+                    strategy=strategy,
+                    n_predictions=n_predictions,
+                    machine_draws=machine_draws if machine_draws else None
+                )
+            except Exception as e:
+                print(f"ERROR: generate_predictions failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'error': 'Prediction generation failed',
+                    'message': str(e)
+                }), 500
         
         print(f"DEBUG: generate_predictions returned: {predictions}")
         print(f"DEBUG: predictions.keys() = {list(predictions.keys())}")
@@ -313,7 +369,7 @@ def predict():
         
         # CRITICAL FIX: If strategy is intelligence/yearly and predictions dict is empty or missing the key,
         # provide a fallback immediately
-        if strategy in ['intelligence', 'yearly', 'transfer']:
+        if strategy in ['intelligence', 'yearly', 'transfer', 'check_balance']:
             if not predictions or strategy not in predictions:
                 print(f"CRITICAL: {strategy} strategy but predictions dict is empty or missing {strategy} key!")
                 print(f"  predictions = {predictions}")
@@ -348,9 +404,9 @@ def predict():
                     }
                 continue
             
-            # Special handling for intelligence, yearly, and transfer strategies - provide fallback if empty
+            # Special handling for intelligence, yearly, transfer, and check_balance strategies - provide fallback if empty
             if not preds or len(preds) == 0:
-                if method in ['intelligence', 'yearly', 'transfer']:
+                if method in ['intelligence', 'yearly', 'transfer', 'check_balance']:
                     print(f"ERROR: {method} strategy returned no predictions (preds: {preds})")
                     print(f"  This is a critical error - {method} strategy must return predictions")
                     # Provide a fallback prediction based on frequency

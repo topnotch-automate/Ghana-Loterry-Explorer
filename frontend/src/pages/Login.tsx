@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { ErrorDisplay } from '../components/ErrorDisplay';
-import { LoadingSpinner } from '../components/LoadingSpinner';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');

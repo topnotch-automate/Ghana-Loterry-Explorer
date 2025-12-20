@@ -6,9 +6,11 @@ import { useSubscription } from '../contexts/SubscriptionContext';
 import { DrawCard } from '../components/DrawCard';
 import { FrequencyChart } from '../components/FrequencyChart';
 import { DrawModal } from '../components/DrawModal';
-import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorDisplay } from '../components/ErrorDisplay';
+import { DashboardSkeleton } from '../components/SkeletonLoader';
+import { VirtualList } from '../components/VirtualList';
 import { handleApiError } from '../utils/errors';
+import { useSavedPredictions, useStrategyPerformance, useCheckPredictions } from '../hooks/usePredictions';
 import type { Draw, FrequencyStats, SavedPrediction, StrategyPerformance, TwoSureThreeDirect } from '../types';
 
 // Interface for special predictions (Two Sure and Three Direct)
@@ -35,11 +37,26 @@ export const Dashboard: React.FC = () => {
   const [latestDraw, setLatestDraw] = useState<Draw | null>(null);
   const [recentDraws, setRecentDraws] = useState<Draw[]>([]);
   const [frequencyStats, setFrequencyStats] = useState<FrequencyStats[]>([]);
-  const [savedPredictions, setSavedPredictions] = useState<SavedPrediction[]>([]);
-  const [strategyPerformance, setStrategyPerformance] = useState<StrategyPerformance | null>(null);
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Use React Query hooks for saved predictions and strategy performance
+  const { 
+    data: savedPredictions = [], 
+    isLoading: loadingPredictions,
+    refetch: refetchPredictions 
+  } = useSavedPredictions({ enabled: isAuthenticated });
+  
+  const { 
+    data: strategyPerformance = null, 
+    isLoading: loadingStrategyPerformance 
+  } = useStrategyPerformance({ enabled: isAuthenticated });
+  
+  const { 
+    mutate: checkPredictions, 
+    isPending: checkingPredictions 
+  } = useCheckPredictions();
   
   // State for Two Sure and Three Direct
   const [specialPredictions, setSpecialPredictions] = useState<SpecialPredictions>({
@@ -64,9 +81,23 @@ export const Dashboard: React.FC = () => {
   const [savingThreeDirect, setSavingThreeDirect] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   
-  // Check predictions state
-  const [checkingPredictions, setCheckingPredictions] = useState(false);
+  // Check predictions result state
   const [checkResult, setCheckResult] = useState<{ message: string; totalChecked: number } | null>(null);
+  
+  // Pagination state for saved predictions
+  const [currentPredictionPage, setCurrentPredictionPage] = useState(0);
+  const predictionsPerPage = 5; // Show 5 predictions per page
+  
+  // Strategy performance expand/collapse state
+  const [expandedPeriods, setExpandedPeriods] = useState<{
+    week: boolean;
+    month: boolean;
+    year: boolean;
+  }>({
+    week: false,
+    month: false,
+    year: false,
+  });
 
   useEffect(() => {
     loadDashboardData();
@@ -75,6 +106,14 @@ export const Dashboard: React.FC = () => {
       loadSavedSpecialPredictions();
     }
   }, [isAuthenticated, subscription?.isPro]);
+
+  // Adjust page if out of bounds when predictions change
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(savedPredictions.length / predictionsPerPage) - 1);
+    if (currentPredictionPage > maxPage) {
+      setCurrentPredictionPage(maxPage);
+    }
+  }, [savedPredictions.length]); // Only depend on length, not currentPredictionPage
 
   // Load available lotto types
   const loadLottoTypes = async () => {
@@ -198,40 +237,36 @@ export const Dashboard: React.FC = () => {
 
   // Handle checking all UNCHECKED predictions against draws
   // Does NOT reset already checked predictions - only checks pending ones
+  // Uses React Query mutation for automatic cache invalidation
   const handleCheckPredictions = async () => {
-    try {
-      setCheckingPredictions(true);
-      setCheckResult(null);
-
-      // Use check-all which only checks unchecked predictions (doesn't reset properly checked ones)
-      const result = await predictionsApi.checkAllPredictions();
-      
-      if (result.totalChecked > 0) {
-        setCheckResult({
-          message: `Checked ${result.totalChecked} prediction(s)`,
-          totalChecked: result.totalChecked,
-        });
-      } else {
-        setCheckResult({
-          message: 'All predictions are already checked',
-          totalChecked: 0,
-        });
-      }
-
-      // Refresh the saved predictions to show updated matches
-      if (isAuthenticated) {
-        const history = await predictionsApi.getHistory(10);
-        setSavedPredictions(history);
-      }
-
+    if (!subscription?.isPro) {
+      setCheckResult({ message: 'Pro subscription required', totalChecked: 0 });
       setTimeout(() => setCheckResult(null), 5000);
-    } catch (err) {
-      console.error('Failed to check predictions:', err);
-      setCheckResult({ message: 'Failed to check predictions', totalChecked: 0 });
-      setTimeout(() => setCheckResult(null), 5000);
-    } finally {
-      setCheckingPredictions(false);
+      return;
     }
+
+    checkPredictions(undefined, {
+      onSuccess: (result) => {
+        // React Query will automatically refetch saved predictions and strategy performance
+        if (result.totalChecked > 0) {
+          setCheckResult({
+            message: `Checked ${result.totalChecked} prediction(s)`,
+            totalChecked: result.totalChecked,
+          });
+        } else {
+          setCheckResult({
+            message: 'All predictions are already checked',
+            totalChecked: 0,
+          });
+        }
+        setTimeout(() => setCheckResult(null), 5000);
+      },
+      onError: (err) => {
+        console.error('Failed to check predictions:', err);
+        setCheckResult({ message: 'Failed to check predictions', totalChecked: 0 });
+        setTimeout(() => setCheckResult(null), 5000);
+      },
+    });
   };
 
   const loadDashboardData = async () => {
@@ -245,20 +280,11 @@ export const Dashboard: React.FC = () => {
         analyticsApi.getFrequency({ days: 30 }).catch(() => []),
       ];
 
-      // Load saved predictions and strategy performance if authenticated
-      if (isAuthenticated) {
-        promises.push(predictionsApi.getHistory(10).catch(() => []));
-        promises.push(predictionsApi.getStrategyPerformance().catch(() => null));
-      }
-
       const results = await Promise.all(promises);
       if (results[0]) setLatestDraw(results[0]);
       setRecentDraws(results[1]);
       setFrequencyStats(results[2]);
-      if (isAuthenticated) {
-        if (results[3]) setSavedPredictions(results[3]);
-        if (results[4]) setStrategyPerformance(results[4]);
-      }
+      // Saved predictions and strategy performance are now handled by React Query hooks
     } catch (err) {
       setError(handleApiError(err));
     } finally {
@@ -266,8 +292,9 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return <LoadingSpinner message="Loading dashboard..." fullScreen />;
+  // Show loading skeleton if initial data is loading
+  if (loading || (isAuthenticated && loadingPredictions)) {
+    return <DashboardSkeleton />;
   }
 
   if (error) {
@@ -717,6 +744,9 @@ export const Dashboard: React.FC = () => {
                   <div className="space-y-2">
                     {Object.entries(strategyPerformance.week.strategyBreakdown)
                       .sort((a, b) => b[1].totalMatches - a[1].totalMatches)
+                      .filter(([strategy]) => 
+                        expandedPeriods.week || strategy === strategyPerformance.week.bestStrategy
+                      )
                       .map(([strategy, stats]) => (
                         <div
                           key={strategy}
@@ -740,6 +770,31 @@ export const Dashboard: React.FC = () => {
                         </div>
                       ))}
                   </div>
+                  
+                  {/* Show More/Less Button */}
+                  {Object.keys(strategyPerformance.week.strategyBreakdown).length > 1 && (
+                    <button
+                      onClick={() => setExpandedPeriods(prev => ({ ...prev, week: !prev.week }))}
+                      className="mt-3 w-full py-3 sm:py-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 active:bg-blue-100 active:scale-95 rounded-lg transition-all flex items-center justify-center gap-1 min-h-[44px]"
+                    >
+                      {expandedPeriods.week ? (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                          </svg>
+                          Show Less
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                          Show {Object.keys(strategyPerformance.week.strategyBreakdown).length - 1} More
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
                   <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
                     <div>Total Days: <span className="font-semibold">{strategyPerformance.week.daysWithMatches}</span></div>
                   </div>
@@ -768,6 +823,9 @@ export const Dashboard: React.FC = () => {
                   <div className="space-y-2">
                     {Object.entries(strategyPerformance.month.strategyBreakdown)
                       .sort((a, b) => b[1].totalMatches - a[1].totalMatches)
+                      .filter(([strategy]) => 
+                        expandedPeriods.month || strategy === strategyPerformance.month.bestStrategy
+                      )
                       .map(([strategy, stats]) => (
                         <div
                           key={strategy}
@@ -791,6 +849,31 @@ export const Dashboard: React.FC = () => {
                         </div>
                       ))}
                   </div>
+                  
+                  {/* Show More/Less Button */}
+                  {Object.keys(strategyPerformance.month.strategyBreakdown).length > 1 && (
+                    <button
+                      onClick={() => setExpandedPeriods(prev => ({ ...prev, month: !prev.month }))}
+                      className="mt-3 w-full py-3 sm:py-2 text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 active:bg-purple-100 active:scale-95 rounded-lg transition-all flex items-center justify-center gap-1 min-h-[44px]"
+                    >
+                      {expandedPeriods.month ? (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                          </svg>
+                          Show Less
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                          Show {Object.keys(strategyPerformance.month.strategyBreakdown).length - 1} More
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
                   <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
                     <div>Total Days: <span className="font-semibold">{strategyPerformance.month.daysWithMatches}</span></div>
                   </div>
@@ -819,6 +902,9 @@ export const Dashboard: React.FC = () => {
                   <div className="space-y-2">
                     {Object.entries(strategyPerformance.year.strategyBreakdown)
                       .sort((a, b) => b[1].totalMatches - a[1].totalMatches)
+                      .filter(([strategy]) => 
+                        expandedPeriods.year || strategy === strategyPerformance.year.bestStrategy
+                      )
                       .map(([strategy, stats]) => (
                         <div
                           key={strategy}
@@ -842,6 +928,31 @@ export const Dashboard: React.FC = () => {
                         </div>
                       ))}
                   </div>
+                  
+                  {/* Show More/Less Button */}
+                  {Object.keys(strategyPerformance.year.strategyBreakdown).length > 1 && (
+                    <button
+                      onClick={() => setExpandedPeriods(prev => ({ ...prev, year: !prev.year }))}
+                      className="mt-3 w-full py-3 sm:py-2 text-sm font-medium text-green-600 hover:text-green-700 hover:bg-green-50 active:bg-green-100 active:scale-95 rounded-lg transition-all flex items-center justify-center gap-1 min-h-[44px]"
+                    >
+                      {expandedPeriods.year ? (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                          </svg>
+                          Show Less
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                          Show {Object.keys(strategyPerformance.year.strategyBreakdown).length - 1} More
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
                   <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
                     <div>Total Days: <span className="font-semibold">{strategyPerformance.year.daysWithMatches}</span></div>
                   </div>
@@ -872,7 +983,7 @@ export const Dashboard: React.FC = () => {
                 <button
                   onClick={handleCheckPredictions}
                   disabled={checkingPredictions}
-                  className="px-3 py-1.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg text-sm font-medium hover:from-green-600 hover:to-emerald-600 transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  className="px-4 py-2.5 sm:px-3 sm:py-1.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg text-sm font-medium hover:from-green-600 hover:to-emerald-600 active:from-green-700 active:to-emerald-700 active:scale-95 transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 min-h-[44px] min-w-[44px]"
                   title="Check all pending predictions against today's draws"
                 >
                   {checkingPredictions ? (
@@ -911,8 +1022,52 @@ export const Dashboard: React.FC = () => {
                 : 'No pending predictions to check or no matching draws found.')}
           </div>
           )}
+          
+          {/* Pagination Controls */}
+          {savedPredictions.length > predictionsPerPage && (
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Showing {currentPredictionPage * predictionsPerPage + 1} to{' '}
+                {Math.min((currentPredictionPage + 1) * predictionsPerPage, savedPredictions.length)} of{' '}
+                {savedPredictions.length} predictions
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPredictionPage(prev => Math.max(0, prev - 1))}
+                  disabled={currentPredictionPage === 0}
+                  className="px-4 py-2.5 sm:px-3 sm:py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 active:bg-gray-300 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 text-sm font-medium min-h-[44px]"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Previous
+                </button>
+                <span className="px-3 py-1.5 text-sm text-gray-600 font-medium">
+                  Page {currentPredictionPage + 1} of {Math.ceil(savedPredictions.length / predictionsPerPage)}
+                </span>
+                <button
+                  onClick={() => setCurrentPredictionPage(prev => 
+                    Math.min(Math.ceil(savedPredictions.length / predictionsPerPage) - 1, prev + 1)
+                  )}
+                  disabled={currentPredictionPage >= Math.ceil(savedPredictions.length / predictionsPerPage) - 1}
+                  className="px-4 py-2.5 sm:px-3 sm:py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 active:bg-gray-300 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 text-sm font-medium min-h-[44px]"
+                >
+                  Next
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+          
           <div className="space-y-4">
-            {savedPredictions.map((prediction, index) => (
+            {savedPredictions
+              .slice(
+                currentPredictionPage * predictionsPerPage,
+                (currentPredictionPage + 1) * predictionsPerPage
+              )
+              .map((prediction, index) => (
               <div
                 key={prediction.id}
                 className={`p-4 rounded-lg border-2 transition-all animate-slide-up ${
@@ -1010,7 +1165,8 @@ export const Dashboard: React.FC = () => {
                       if (window.confirm('Are you sure you want to delete this prediction?')) {
                         try {
                           await predictionsApi.deletePrediction(prediction.id);
-                          setSavedPredictions(savedPredictions.filter(p => p.id !== prediction.id));
+                          // React Query will automatically refetch saved predictions after deletion
+                          refetchPredictions();
                         } catch (err) {
                           setError(handleApiError(err));
                         }

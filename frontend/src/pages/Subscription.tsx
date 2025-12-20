@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { subscriptionsApi, SubscriptionStatusData } from '../api/client';
 import { handleApiError } from '../utils/errors';
-import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorDisplay } from '../components/ErrorDisplay';
 
 export const Subscription: React.FC = () => {

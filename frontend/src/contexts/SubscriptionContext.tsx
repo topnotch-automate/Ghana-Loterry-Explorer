@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { predictionsApi } from '../api/client';
 import { useAuth } from './AuthContext';
-import { handleApiError } from '../utils/errors';
 import type { SubscriptionStatus } from '../types';
 
 interface SubscriptionContextType {

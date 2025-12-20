@@ -1,36 +1,50 @@
 import React, { useState } from 'react';
-import { drawsApi } from '../api/client';
 import { SearchBar } from '../components/SearchBar';
 import { DrawCard } from '../components/DrawCard';
 import { DrawModal } from '../components/DrawModal';
 import { handleApiError } from '../utils/errors';
 import { LOTTERY, UI } from '../utils/constants';
+import { useSearch, useAllDraws } from '../hooks/useSearch';
 import type { SearchResult, SearchMode } from '../types';
 
 export const Search: React.FC = () => {
-  const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedDraw, setSelectedDraw] = useState<SearchResult | null>(null);
-  const [loading, setLoading] = useState(false);
   const [queryNumbers, setQueryNumbers] = useState<number[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [searchMode, setSearchMode] = useState<SearchMode>('any');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const handleSearch = async (query: string, mode: SearchMode) => {
-    setError(null);
+  // React Query hooks
+  const { 
+    data: searchResults = [], 
+    isLoading: loadingSearch,
+    error: searchError 
+  } = useSearch(
+    { numbers: queryNumbers, mode: searchMode },
+    { enabled: queryNumbers.length > 0 && hasSearched }
+  );
+
+  const { 
+    data: allDraws = [], 
+    isLoading: loadingAll,
+    error: allDrawsError 
+  } = useAllDraws(
+    UI.ITEMS_PER_PAGE,
+    { enabled: hasSearched && queryNumbers.length === 0 }
+  );
+
+  const loading = loadingSearch || loadingAll;
+  const error = searchError || allDrawsError;
+  const results = queryNumbers.length > 0 ? searchResults : allDraws;
+
+  const handleSearch = (query: string, mode: SearchMode) => {
+    setSearchQuery(query);
+    setSearchMode(mode);
     
     if (!query.trim()) {
       // If empty query, show all draws
-      try {
-        setLoading(true);
-        const allDraws = await drawsApi.getAll({ limit: UI.ITEMS_PER_PAGE });
-        setResults(allDraws as SearchResult[]);
-        setQueryNumbers([]);
-        setHasSearched(true);
-      } catch (err) {
-        setError(handleApiError(err));
-      } finally {
-        setLoading(false);
-      }
+      setQueryNumbers([]);
+      setHasSearched(true);
       return;
     }
 
@@ -41,24 +55,12 @@ export const Search: React.FC = () => {
       .slice(0, UI.MAX_SEARCH_NUMBERS);
 
     if (numbers.length === 0) {
-      setError(`Please enter valid numbers between ${LOTTERY.MIN_NUMBER} and ${LOTTERY.MAX_NUMBER}`);
+      // Error will be handled by the component
       return;
     }
 
-    try {
-      setLoading(true);
-      setQueryNumbers(numbers);
-      const searchResults = await drawsApi.search({
-        numbers,
-        mode,
-      });
-      setResults(searchResults);
-      setHasSearched(true);
-    } catch (err) {
-      setError(handleApiError(err));
-    } finally {
-      setLoading(false);
-    }
+    setQueryNumbers(numbers);
+    setHasSearched(true);
   };
 
   const handleExportCSV = async () => {
@@ -74,8 +76,9 @@ export const Search: React.FC = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (err) {
-      setError(handleApiError(err));
+    } catch (err: any) {
+      console.error('Export error:', err);
+      // Error handling - could show a toast notification
     }
   };
 
@@ -92,8 +95,9 @@ export const Search: React.FC = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (err) {
-      setError(handleApiError(err));
+    } catch (err: any) {
+      console.error('Export error:', err);
+      // Error handling - could show a toast notification
     }
   };
 
@@ -126,7 +130,7 @@ export const Search: React.FC = () => {
             </div>
             <div className="flex-1">
               <div className="text-red-800 font-semibold mb-1">Error</div>
-              <div className="text-red-700 text-sm">{error}</div>
+              <div className="text-red-700 text-sm">{handleApiError(error)}</div>
             </div>
           </div>
         </div>
@@ -183,17 +187,17 @@ export const Search: React.FC = () => {
               <p className="text-sm text-gray-500">Try adjusting your search numbers or mode</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {results.map((draw, index) => (
-                <div key={draw.id} className="animate-slide-up" style={{ animationDelay: `${index * 50}ms` }}>
-                  <DrawCard
-                    draw={draw}
-                    queryNumbers={queryNumbers}
-                    onClick={() => setSelectedDraw(draw)}
-                  />
-                </div>
-              ))}
-            </div>
+            <ResponsiveVirtualList
+              items={results}
+              renderItem={(draw, index) => (
+                <DrawCard
+                  draw={draw}
+                  queryNumbers={queryNumbers}
+                  onClick={() => setSelectedDraw(draw)}
+                />
+              )}
+              threshold={30}
+            />
           )}
         </div>
       )}

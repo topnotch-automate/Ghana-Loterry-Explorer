@@ -88,7 +88,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = fals
                 disabled={isLoading}
               >
                 <option value="partial">Partial Match (Any Panel)</option>
-                <option value="exact">Exact 10-Number Match</option>
+                <option value="exact">Exact 5-Number Match</option>
                 <option value="winning-only">Winning Panel Only</option>
                 <option value="machine-only">Machine Panel Only</option>
                 <option value="group">Group Match (2+ numbers together)</option>

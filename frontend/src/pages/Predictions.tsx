@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { predictionsApi, drawsApi } from '../api/client';
+import { predictionsApi } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { PredictionCard } from '../components/PredictionCard';
@@ -8,6 +8,7 @@ import { UpgradePrompt } from '../components/UpgradePrompt';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorDisplay } from '../components/ErrorDisplay';
 import { handleApiError } from '../utils/errors';
+import { useLottoTypes } from '../hooks/useLottoTypes';
 import type { PredictionResponse, PredictionStrategy } from '../types';
 
 // Strategy icons and descriptions
@@ -67,10 +68,25 @@ export const Predictions: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<PredictionStrategy>('ensemble');
   const [serviceAvailable, setServiceAvailable] = useState<boolean | null>(null);
-  const [lottoTypes, setLottoTypes] = useState<string[]>([]);
   const [selectedLottoType, setSelectedLottoType] = useState<string>('');
   const [useTypeSpecificTable, setUseTypeSpecificTable] = useState<boolean>(true);
-  const [loadingTypes, setLoadingTypes] = useState(false);
+  
+  // React Query hook for lotto types
+  const { 
+    data: lottoTypes = [], 
+    isLoading: loadingTypes,
+    error: lottoTypesError 
+  } = useLottoTypes();
+  
+  // Log lotto types for debugging
+  useEffect(() => {
+    if (lottoTypes.length > 0) {
+      console.log('Lotto types loaded:', lottoTypes);
+    }
+    if (lottoTypesError) {
+      console.error('Error loading lotto types:', lottoTypesError);
+    }
+  }, [lottoTypes, lottoTypesError]);
   const [savingPrediction, setSavingPrediction] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   
@@ -78,6 +94,14 @@ export const Predictions: React.FC = () => {
   const [savingTwoSure, setSavingTwoSure] = useState(false);
   const [savingThreeDirect, setSavingThreeDirect] = useState(false);
   const [specialSaveSuccess, setSpecialSaveSuccess] = useState<string | null>(null);
+  
+  // State for check-and-balance prediction
+  const [checkBalancePrediction, setCheckBalancePrediction] = useState<PredictionResponse | null>(null);
+  const [loadingCheckBalance, setLoadingCheckBalance] = useState(false);
+  const [checkBalanceError, setCheckBalanceError] = useState<string | null>(null);
+  const [recommendedStrategy, setRecommendedStrategy] = useState<string | null>(null);
+  const [strategyConfidence, setStrategyConfidence] = useState<number | null>(null);
+  const [winningPredictionsCount, setWinningPredictionsCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -85,25 +109,14 @@ export const Predictions: React.FC = () => {
       return;
     }
     checkServiceHealth();
-    loadLottoTypes();
   }, [isAuthenticated, navigate]);
 
-  const loadLottoTypes = async () => {
-    try {
-      setLoadingTypes(true);
-      const types = await drawsApi.getLottoTypes();
-      console.log('Loaded lotto types:', types); // Debug log
-      setLottoTypes(types);
-      if (types.length > 0 && !selectedLottoType) {
-        setSelectedLottoType(types[0]); // Select first type by default
-      }
-    } catch (err) {
-      console.error('Failed to load lotto types:', err);
-      setError('Failed to load lotto types. Please refresh the page.');
-    } finally {
-      setLoadingTypes(false);
+  // Set default lotto type when types are loaded
+  useEffect(() => {
+    if (lottoTypes.length > 0 && !selectedLottoType) {
+      setSelectedLottoType(lottoTypes[0]); // Select first type by default
     }
-  };
+  }, [lottoTypes, selectedLottoType]);
 
   const checkServiceHealth = async () => {
     try {
@@ -114,7 +127,7 @@ export const Predictions: React.FC = () => {
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     if (!subscription?.isPro) {
       setError('Pro subscription required');
       return;
@@ -135,7 +148,56 @@ export const Predictions: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [strategy, selectedLottoType, useTypeSpecificTable, subscription?.isPro]);
+
+  const handleGenerateCheckBalance = useCallback(async () => {
+    if (!subscription?.isPro) {
+      setCheckBalanceError('Pro subscription required');
+      return;
+    }
+
+    try {
+      setLoadingCheckBalance(true);
+      setCheckBalanceError(null);
+      setCheckBalancePrediction(null);
+      setRecommendedStrategy(null);
+      setStrategyConfidence(null);
+      setWinningPredictionsCount(null);
+      
+      const result = await predictionsApi.generateCheckBalance({
+        lottoType: selectedLottoType || undefined,
+        useTypeSpecificTable: useTypeSpecificTable && selectedLottoType ? true : undefined,
+      });
+      
+      setCheckBalancePrediction(result);
+      
+      // Extract metadata if available (from the response object)
+      const metadata = result as any;
+      if (metadata.recommendedStrategy) {
+        setRecommendedStrategy(metadata.recommendedStrategy);
+        setStrategyConfidence(metadata.strategyConfidence || null);
+        setWinningPredictionsCount(metadata.winningPredictionsAnalyzed || null);
+      } else {
+        // Reset if no metadata
+        setRecommendedStrategy(null);
+        setStrategyConfidence(null);
+        setWinningPredictionsCount(null);
+      }
+    } catch (err: any) {
+      // Handle NO_WINNING_PREDICTIONS error specially
+      if (err.code === 'NO_WINNING_PREDICTIONS' || err.message?.includes('NO_WINNING_PREDICTIONS')) {
+        setCheckBalanceError('NO_WINNING_PREDICTIONS');
+      } else {
+        setCheckBalanceError(handleApiError(err));
+      }
+      setCheckBalancePrediction(null);
+      setRecommendedStrategy(null);
+      setStrategyConfidence(null);
+      setWinningPredictionsCount(null);
+    } finally {
+      setLoadingCheckBalance(false);
+    }
+  }, [selectedLottoType, useTypeSpecificTable, subscription?.isPro]);
 
   const handleSavePrediction = async () => {
     if (!predictions) return;
@@ -424,7 +486,7 @@ export const Predictions: React.FC = () => {
               <button
                 key={strat}
                 onClick={() => setStrategy(strat)}
-                className={`relative p-4 rounded-xl border-2 transition-all text-left group ${
+                className={`relative p-5 sm:p-4 rounded-xl border-2 transition-all text-left group active:scale-95 min-h-[80px] sm:min-h-0 ${
                   isSelected
                     ? `border-primary-500 bg-gradient-to-br ${info.color} text-white shadow-lg transform scale-105`
                     : 'border-gray-200 bg-white hover:border-primary-300 hover:shadow-md'
@@ -454,31 +516,56 @@ export const Predictions: React.FC = () => {
         </div>
       </div>
 
-      {/* Generate Button */}
-      <div className="flex flex-col items-center gap-4">
-        <button
-          onClick={handleGenerate}
-          disabled={loading || serviceAvailable === false}
-          className="relative px-10 py-4 text-lg font-semibold rounded-xl bg-gradient-to-r from-primary-600 to-accent-500 text-white shadow-lg hover:shadow-xl transform hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg min-w-[200px]"
-        >
-          {loading ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Generating...
-            </span>
-          ) : (
-            <span className="flex items-center gap-2">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Generate Predictions
-            </span>
-          )}
-        </button>
-        {loading && (
+      {/* Generate Buttons */}
+      <div className="flex flex-col items-center gap-6">
+        <div className="flex flex-col sm:flex-row gap-4 items-center">
+          <button
+            onClick={handleGenerate}
+            disabled={loading || serviceAvailable === false}
+            className="relative px-8 py-4 sm:px-10 sm:py-4 text-base sm:text-lg font-semibold rounded-xl bg-gradient-to-r from-primary-600 to-accent-500 text-white shadow-lg hover:shadow-xl active:scale-95 transform hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg w-full sm:w-auto sm:min-w-[200px] min-h-[44px]"
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Generating...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Generate Predictions
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={handleGenerateCheckBalance}
+            disabled={loadingCheckBalance || serviceAvailable === false}
+            className="relative px-8 py-4 sm:px-10 sm:py-4 text-base sm:text-lg font-semibold rounded-xl bg-gradient-to-r from-teal-600 to-cyan-500 text-white shadow-lg hover:shadow-xl active:scale-95 transform hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg w-full sm:w-auto sm:min-w-[200px] min-h-[44px]"
+          >
+            {loadingCheckBalance ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Analyzing...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                Check & Balance
+              </span>
+            )}
+          </button>
+        </div>
+        {(loading || loadingCheckBalance) && (
           <div className="text-sm text-gray-500 flex items-center gap-2">
             <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse" />
             This may take a few moments...
@@ -492,6 +579,68 @@ export const Predictions: React.FC = () => {
           onRetry={handleGenerate}
           title="Prediction Error"
         />
+      )}
+
+      {checkBalanceError && (
+        <div className="card border-2 border-amber-200 bg-amber-50">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0">
+              <svg className="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-amber-900 mb-2">Check & Balance Not Available</h3>
+              {checkBalanceError === 'NO_WINNING_PREDICTIONS' ? (
+                <div className="space-y-3">
+                  <p className="text-amber-800">
+                    The Check & Balance algorithm requires past winning or partial predictions to analyze and recommend the best strategy.
+                  </p>
+                  <p className="text-amber-800 font-medium">
+                    Currently, there are no winning or partial predictions in your history.
+                  </p>
+                  <div className="mt-4 p-4 bg-white rounded-lg border border-amber-200">
+                    <p className="text-sm text-amber-900 font-semibold mb-2">What you can do:</p>
+                    <ul className="list-disc list-inside space-y-1 text-sm text-amber-800">
+                      <li>Try other prediction strategies above (Ensemble, ML, Genetic, Pattern, Intelligence, Yearly, or Transfer)</li>
+                      <li>Generate and save predictions using any strategy</li>
+                      <li>Once you have some successful predictions (wins or partials), Check & Balance will be available</li>
+                      <li>Check back later after your predictions have been evaluated against actual draws</li>
+                    </ul>
+                  </div>
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      onClick={() => {
+                        setCheckBalanceError(null);
+                        setStrategy('ensemble');
+                        handleGenerate();
+                      }}
+                      className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
+                    >
+                      Try Ensemble Strategy
+                    </button>
+                    <button
+                      onClick={() => setCheckBalanceError(null)}
+                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-amber-800 mb-4">{checkBalanceError}</p>
+                  <button
+                    onClick={handleGenerateCheckBalance}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Results */}
@@ -721,6 +870,7 @@ export const Predictions: React.FC = () => {
                     title="Ensemble Prediction"
                     prediction={predictions.predictions.ensemble[0]}
                     strategy="ensemble"
+                    confidence={predictions.confidence?.ensemble}
                   />
                 </div>
               )}
@@ -730,6 +880,7 @@ export const Predictions: React.FC = () => {
                     title="ML Prediction"
                     prediction={predictions.predictions.ml[0]}
                     strategy="ml"
+                    confidence={predictions.confidence?.ml}
                   />
                 </div>
               )}
@@ -739,6 +890,7 @@ export const Predictions: React.FC = () => {
                     title="Genetic Prediction"
                     prediction={predictions.predictions.genetic[0]}
                     strategy="genetic"
+                    confidence={predictions.confidence?.genetic}
                   />
                 </div>
               )}
@@ -748,6 +900,7 @@ export const Predictions: React.FC = () => {
                     title="Pattern Prediction"
                     prediction={predictions.predictions.pattern[0]}
                     strategy="pattern"
+                    confidence={predictions.confidence?.pattern}
                   />
                 </div>
               )}
@@ -757,6 +910,7 @@ export const Predictions: React.FC = () => {
                     title="Intelligence Prediction"
                     prediction={predictions.predictions.intelligence[0]}
                     strategy="intelligence"
+                    confidence={predictions.confidence?.intelligence}
                   />
                 </div>
               )}
@@ -766,6 +920,7 @@ export const Predictions: React.FC = () => {
                     title="Yearly Pattern Prediction"
                     prediction={predictions.predictions.yearly[0]}
                     strategy="yearly"
+                    confidence={predictions.confidence?.yearly}
                   />
                 </div>
               )}
@@ -776,10 +931,115 @@ export const Predictions: React.FC = () => {
                     title="Transfer Pattern Prediction"
                     prediction={predictions.predictions.transfer[0]}
                     strategy="transfer"
+                    confidence={predictions.confidence?.transfer}
                   />
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Check & Balance Prediction Results */}
+      {checkBalancePrediction && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="card">
+            <div className="flex items-center gap-2 mb-6">
+              <svg className="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              <h2 className="text-xl font-semibold text-gray-800">Check & Balance Prediction</h2>
+            </div>
+
+            {/* Strategy Recommendation Info - Only show if we have winning predictions */}
+            {recommendedStrategy && winningPredictionsCount && winningPredictionsCount > 0 && (
+              <div className="mb-6 p-4 bg-gradient-to-r from-teal-50 to-cyan-50 rounded-lg border border-teal-200">
+                <div className="flex items-start gap-3">
+                  <svg className="w-6 h-6 text-teal-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-teal-900 mb-1">Recommended Strategy</h3>
+                    <p className="text-sm text-teal-700 mb-2">
+                      Based on analysis of <strong>{winningPredictionsCount}</strong> past winning predictions, 
+                      the <strong className="capitalize">{recommendedStrategy}</strong> strategy has shown the best performance.
+                    </p>
+                    {strategyConfidence !== null && strategyConfidence > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-teal-600 font-medium">Confidence:</span>
+                        <div className="flex-1 bg-teal-200 rounded-full h-2">
+                          <div 
+                            className="bg-teal-600 h-2 rounded-full transition-all"
+                            style={{ width: `${Math.min(strategyConfidence * 100, 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-teal-600 font-medium">
+                          {(strategyConfidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Prediction Card */}
+            {checkBalancePrediction.predictions.check_balance && 
+             checkBalancePrediction.predictions.check_balance.length > 0 && (
+              <div className="animate-slide-up">
+                <PredictionCard
+                  title="Check & Balance Prediction"
+                  prediction={checkBalancePrediction.predictions.check_balance[0]}
+                  strategy="check_balance"
+                />
+              </div>
+            )}
+
+            {/* Save Button */}
+            {checkBalancePrediction.predictions.check_balance && 
+             checkBalancePrediction.predictions.check_balance.length > 0 && (
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={async () => {
+                    if (!checkBalancePrediction.predictions.check_balance?.[0]?.numbers) return;
+                    try {
+                      setSavingPrediction(true);
+                      await predictionsApi.savePrediction({
+                        numbers: checkBalancePrediction.predictions.check_balance[0].numbers,
+                        strategy: 'check_balance',
+                        lottoType: selectedLottoType || undefined,
+                        targetDrawDate: new Date().toISOString().split('T')[0],
+                      });
+                      setSaveSuccess(true);
+                      setTimeout(() => setSaveSuccess(false), 3000);
+                    } catch (err) {
+                      setCheckBalanceError(handleApiError(err));
+                    } finally {
+                      setSavingPrediction(false);
+                    }
+                  }}
+                  disabled={savingPrediction}
+                  className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {savingPrediction ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      Save Prediction
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
